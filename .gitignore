@@ -1,0 +1,52 @@
+# Local audit reports, cleanup manifests, and runtime verification ledgers
+AUDIT.md
+CLEANUP-PLAN.md
+VERIFICATION.md
+*.audit.md
+*.plan.md
+*.verification.md
+*execution-ledger.json
+*.ledger.json
+
+# Test sandbox directories and temporary test fixtures
+tests/sandbox/
+sandbox/
+
+# Credentials, tokens, keys, certificates, and local private overrides
+.credentials.json
+*credentials*.json
+*secret*.json
+buddy-tokens.json
+.env
+.env.*
+*.pfx
+*.p12
+*.key
+*.pem
+*.cer
+*.crt
+*.local.json
+*.local.ps1
+*.private.json
+
+# Temporary files, backups, and runtime logs
+*.tmp
+*.temp
+*.bak
+*.backup
+*.rea.backup
+*.orig
+*.log
+*.stackdump
+
+# Agent-generated artifacts, IDE local folders, and OS metadata
+.claude/
+.claude.json
+.codex/
+.agents/
+.gemini/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
