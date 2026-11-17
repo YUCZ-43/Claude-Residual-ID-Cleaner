@@ -25,6 +25,12 @@ function Initialize-Utf8ConsoleEncoding {
     $global:OutputEncoding = $utf8NoBom
     try { [Console]::OutputEncoding = $utf8NoBom } catch {}
     try { [Console]::InputEncoding = $utf8NoBom } catch {}
+    if ($OutputFormat -eq 'Json' -or [Console]::IsOutputRedirected -or [Console]::IsErrorRedirected) {
+        $psStyleVar = Get-Variable -Name PSStyle -ErrorAction SilentlyContinue
+        if ($null -ne $psStyleVar -and $null -ne $psStyleVar.Value) {
+            try { $psStyleVar.Value.OutputRendering = 'PlainText' } catch {}
+        }
+    }
 }
 
 function Resolve-UiLanguage {

@@ -2766,10 +2766,52 @@ namespace ClaudeResidualIdCleaner
             _btnClean.IsEnabled = (!busy) && _hasScanned && _hasPlan && (_readyCount > 0);
         }
 
+        public static string StripAnsiEscapeCodes(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
+            string cleaned = Regex.Replace(text, @"\x1B\[[0-9;?]*[A-Za-z]", string.Empty);
+            cleaned = cleaned.Replace("\x1B", string.Empty);
+            return cleaned;
+        }
+
+        public static string TranslateFriendlyBackendError(string rawError, string lang, out bool isProcessWarning, out string customTitle)
+        {
+            string cleaned = StripAnsiEscapeCodes(rawError).Trim();
+            var s = Localization.GetStrings(lang);
+            if (cleaned.IndexOf("Claude is running", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                isProcessWarning = true;
+                customTitle = s["ClaudeRunningTitle"];
+                return s["ClaudeRunningBody"];
+            }
+            if (cleaned.IndexOf("VS Code is running", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                isProcessWarning = true;
+                customTitle = s["VsCodeRunningTitle"];
+                return s["VsCodeRunningBody"];
+            }
+            isProcessWarning = false;
+            customTitle = string.Empty;
+            return cleaned;
+        }
+
+        private void ShowBackendErrorDialog(string logPrefix, string rawError)
+        {
+            string cleanRaw = StripAnsiEscapeCodes(rawError).Trim();
+            bool isProcessWarning;
+            string customTitle;
+            string friendlyMessage = TranslateFriendlyBackendError(cleanRaw, _lang, out isProcessWarning, out customTitle);
+            AppendLog(logPrefix + (isProcessWarning ? friendlyMessage : cleanRaw));
+            string dialogTitle = string.IsNullOrEmpty(customTitle) ? Title : customTitle;
+            MessageBoxImage icon = isProcessWarning ? MessageBoxImage.Warning : MessageBoxImage.Error;
+            MessageBox.Show(this, string.IsNullOrEmpty(friendlyMessage) ? cleanRaw : friendlyMessage, dialogTitle, MessageBoxButton.OK, icon);
+        }
+
         private void AppendLog(string message)
         {
             if (_txtLog == null) return;
-            string line = string.Format("[{0}] {1}{2}", DateTime.Now.ToString("HH:mm:ss"), message, Environment.NewLine);
+            string safeMessage = StripAnsiEscapeCodes(message);
+            string line = string.Format("[{0}] {1}{2}", DateTime.Now.ToString("HH:mm:ss"), safeMessage, Environment.NewLine);
             _txtLog.AppendText(line);
             _txtLog.ScrollToEnd();
         }
@@ -2844,10 +2886,12 @@ namespace ClaudeResidualIdCleaner
                         StandardOutputEncoding = Encoding.UTF8,
                         StandardErrorEncoding = Encoding.UTF8
                     };
+                    psi.EnvironmentVariables["NO_COLOR"] = "1";
+                    psi.EnvironmentVariables["TERM"] = "dumb";
                     using (var proc = Process.Start(psi))
                     {
                         res.StdOut = proc.StandardOutput.ReadToEnd();
-                        res.StdErr = proc.StandardError.ReadToEnd();
+                        res.StdErr = StripAnsiEscapeCodes(proc.StandardError.ReadToEnd());
                         proc.WaitForExit();
                         res.ExitCode = proc.ExitCode;
                     }
@@ -2942,8 +2986,7 @@ namespace ClaudeResidualIdCleaner
             {
                 if (res.ExitCode != 0)
                 {
-                    AppendLog("[ERROR] Scan failed: " + res.StdErr);
-                    MessageBox.Show(this, res.StdErr, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowBackendErrorDialog("[ERROR] Scan failed: ", res.StdErr);
                     return;
                 }
 
@@ -2987,12 +3030,12 @@ namespace ClaudeResidualIdCleaner
                             Policy = policy,
                             ItemId = id,
                             Kind = kind,
-                            Category = cat,
-                            PathOrPackage = path,
+                            Category = StripAnsiEscapeCodes(cat),
+                            PathOrPackage = StripAnsiEscapeCodes(path),
                             Status = statusLabel,
                             StatusTone = tone,
                             Decision = decision,
-                            Details = string.Format("[{0}] {1}", policy, reason),
+                            Details = StripAnsiEscapeCodes(string.Format("[{0}] {1}", policy, reason)),
                             SizeBytes = sizeBytes
                         });
                     }
@@ -3111,8 +3154,7 @@ namespace ClaudeResidualIdCleaner
             {
                 if (res.ExitCode != 0)
                 {
-                    AppendLog("[ERROR] Plan failed: " + res.StdErr);
-                    MessageBox.Show(this, res.StdErr, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowBackendErrorDialog("[ERROR] Plan failed: ", res.StdErr);
                     return;
                 }
 
@@ -3142,8 +3184,7 @@ namespace ClaudeResidualIdCleaner
             {
                 if (previewRes.ExitCode != 0)
                 {
-                    AppendLog("[ERROR] Preview failed: " + previewRes.StdErr);
-                    MessageBox.Show(this, previewRes.StdErr, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowBackendErrorDialog("[ERROR] Preview failed: ", previewRes.StdErr);
                     return;
                 }
 
@@ -3191,8 +3232,7 @@ namespace ClaudeResidualIdCleaner
                 {
                     if (applyRes.ExitCode != 0)
                     {
-                        AppendLog("[ERROR] Cleanup exited " + applyRes.ExitCode + ": " + applyRes.StdErr);
-                        MessageBox.Show(this, applyRes.StdErr, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                        ShowBackendErrorDialog("[ERROR] Cleanup exited " + applyRes.ExitCode + ": ", applyRes.StdErr);
                         return;
                     }
                     _hasPlan = false;
@@ -3221,8 +3261,7 @@ namespace ClaudeResidualIdCleaner
             {
                 if (res.ExitCode != 0)
                 {
-                    AppendLog("[ERROR] Verify failed: " + res.StdErr);
-                    MessageBox.Show(this, res.StdErr, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowBackendErrorDialog("[ERROR] Verify failed: ", res.StdErr);
                     return;
                 }
 
@@ -3308,7 +3347,7 @@ namespace ClaudeResidualIdCleaner
             {
                 if (res.ExitCode != 0)
                 {
-                    MessageBox.Show(this, res.StdErr, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowBackendErrorDialog("[ERROR] Export failed: ", res.StdErr);
                     return;
                 }
                 PromptOpenExportedAudit(targetPath, s);

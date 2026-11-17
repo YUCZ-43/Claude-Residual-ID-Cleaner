@@ -161,6 +161,10 @@ namespace ClaudeResidualIdCleaner
                     "确认立即执行吗？";
                 d["DryRunTitle"] = "预览模式阻止执行";
                 d["DryRunBody"] = "当前处于安全预览模式 (--dry-run)，已展示 -WhatIf 预览清单并阻止真实删除。";
+                d["ClaudeRunningTitle"] = "检测到 Claude 仍在运行";
+                d["ClaudeRunningBody"] = "检测到 Claude 客户端或后台进程仍在运行，为防止文件占用与数据损坏已暂停清理。请先在系统托盘彻底退出 Claude 后，点击确定重试。";
+                d["VsCodeRunningTitle"] = "检测到 VS Code 仍在运行";
+                d["VsCodeRunningBody"] = "检测到 VS Code 仍在运行，为避免扩展残留删除失败，请先彻底关闭所有 VS Code 窗口后重试。";
                 d["FoundLabel"] = "已发现";
                 d["ExcludedLabel"] = "当前方案未包含";
                 d["CleanLabel"] = "无残留";
@@ -301,6 +305,10 @@ namespace ClaudeResidualIdCleaner
                     "Proceed with safe cleanup?";
                 d["DryRunTitle"] = "Dry-Run Mode Active";
                 d["DryRunBody"] = "Running in safe --dry-run mode: -WhatIf preview was evaluated and real deletion was blocked.";
+                d["ClaudeRunningTitle"] = "Claude Is Still Running";
+                d["ClaudeRunningBody"] = "Claude Desktop or background Claude processes are currently running. Cleanup has been paused to prevent file locks. Please quit Claude completely from the system tray and retry.";
+                d["VsCodeRunningTitle"] = "VS Code Is Still Running";
+                d["VsCodeRunningBody"] = "VS Code is currently running. Please close all VS Code windows completely before removing its Claude extension and retry.";
                 d["FoundLabel"] = "Found";
                 d["ExcludedLabel"] = "Scope Excluded";
                 d["CleanLabel"] = "Clean";

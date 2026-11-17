@@ -293,6 +293,45 @@ try {
         (-not (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall claude-cleanup.lnk')))
     ) 'Compiled Setup .exe completes sandboxed uninstall removing managed files and shortcuts cleanly'
 
+    # 10. Verify ANSI escape-code stripping and friendly bilingual "Claude is running" translation on compiled .exe assembly
+    Assert-True (
+        ($progText -match 'StripAnsiEscapeCodes') -and
+        ($progText -match 'TranslateFriendlyBackendError') -and
+        ($progText -match 'ShowBackendErrorDialog') -and
+        ($progText -match '"NO_COLOR"')
+    ) 'Desktop WPF source implements ANSI stripping, friendly error translation, and NO_COLOR child env'
+
+    $guiAsm = [System.Reflection.Assembly]::Load([IO.File]::ReadAllBytes($sandboxExe))
+    $mainWinType = $guiAsm.GetType('ClaudeResidualIdCleaner.MainWindow', $true)
+    $esc = [char]27
+    $rawAnsiClaude = "${esc}[31;1mException: ${esc}[0mD:\repo\ClaudeCleanup.ps1:2631`nClaude is running. Shut it down normally and retry.${esc}[0m"
+    $strippedClaude = $mainWinType.GetMethod('StripAnsiEscapeCodes').Invoke($null, @($rawAnsiClaude))
+
+    $isWarnZh = $false
+    $titleZh = ''
+    $argsZh = [object[]]@($rawAnsiClaude, 'zh-CN', $isWarnZh, $titleZh)
+    $msgZh = $mainWinType.GetMethod('TranslateFriendlyBackendError').Invoke($null, $argsZh)
+
+    $isWarnEn = $false
+    $titleEn = ''
+    $argsEn = [object[]]@($rawAnsiClaude, 'en-US', $isWarnEn, $titleEn)
+    $msgEn = $mainWinType.GetMethod('TranslateFriendlyBackendError').Invoke($null, $argsEn)
+
+    $rawGeneric = "${esc}[31;1mFatal error${esc}[0m: access denied"
+    $argsGen = [object[]]@($rawGeneric, 'en-US', $false, '')
+    $msgGen = $mainWinType.GetMethod('TranslateFriendlyBackendError').Invoke($null, $argsGen)
+
+    Assert-True (
+        (-not $strippedClaude.Contains($esc)) -and
+        ($strippedClaude -notmatch '\[31;1m|\[0m') -and
+        ([bool]$argsZh[2] -eq $true) -and
+        ($msgZh -match '检测到 Claude 客户端或后台进程仍在运行') -and
+        ([bool]$argsEn[2] -eq $true) -and
+        ($msgEn -match 'Claude Desktop or background Claude processes are currently running') -and
+        ([bool]$argsGen[2] -eq $false) -and
+        ($msgGen -eq 'Fatal error: access denied')
+    ) 'Compiled .exe strips ANSI escape codes cleanly and translates Claude-running error in zh-CN and en-US'
+
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; $($failedList.Count) failed"
     if ($failedList.Count -gt 0) { exit 1 }
     exit 0
