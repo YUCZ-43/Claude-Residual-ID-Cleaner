@@ -3,7 +3,9 @@ param(
     [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputDirectory = '',
     [string]$PackageName = 'claude-cleanup',
-    [string]$Version = '0.1.0'
+    [string]$Version = '0.1.0',
+    [string]$DesktopExePath = '',
+    [switch]$ExcludeDesktopExe
 )
 
 Set-StrictMode -Version 2.0
@@ -81,7 +83,8 @@ function Test-ReleaseExcludedPath {
         '.env',
         'Thumbs.db',
         'desktop.ini',
-        '.DS_Store'
+        '.DS_Store',
+        'Claude-Residual-ID-Cleaner.exe'
     )
     foreach ($name in $exactExcludedNames) {
         if ($leaf.Equals($name, [StringComparison]::OrdinalIgnoreCase)) {
@@ -89,7 +92,7 @@ function Test-ReleaseExcludedPath {
         }
     }
 
-    # Excluded filename patterns: local reports, ledgers, credentials, keys, certs, local overrides, logs, temps, backups
+    # Excluded filename patterns: local reports, ledgers, credentials, keys, certs, local overrides, logs, temps, backups, stale release zips
     $patternList = @(
         '(?i)\.audit\.md$',
         '(?i)\.plan\.md$',
@@ -102,7 +105,9 @@ function Test-ReleaseExcludedPath {
         '(?i)\.(?:pfx|p12|key|pem|cer|crt)$',
         '(?i)\.(?:local|private)\.(?:json|ps1)$',
         '(?i)personal.*log',
-        '(?i)\.(?:log|tmp|temp|bak|backup|rea\.backup|orig|stackdump)$'
+        '(?i)\.(?:log|tmp|temp|bak|backup|rea\.backup|orig|stackdump)$',
+        '(?i)^Windows-Claude-Cleanup-.*\.zip$',
+        '(?i)^claude-cleanup-.*\.zip$'
     )
     foreach ($pat in $patternList) {
         if ($leaf -match $pat) {
@@ -181,24 +186,72 @@ while ($dirStack.Count -gt 0) {
     }
 }
 
-$sortedIncluded = @($includedEntries | Sort-Object -Property RelativePath)
-if ($sortedIncluded.Count -eq 0) {
-    throw "No eligible files found to package in '$resolvedSourceRoot'."
-}
+$tempExeBuildDir = ''
+$tempZipPath = ''
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-if (-not (Test-Path -LiteralPath $resolvedOutputDir)) {
-    New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
-}
-
-$zipFileName = "$PackageName-$Version.zip"
-$zipPath = Join-Path $resolvedOutputDir $zipFileName
-$tempZipPath = Join-Path $resolvedOutputDir ("$zipFileName.tmp-" + [Guid]::NewGuid().ToString('N'))
-$sumsPath = Join-Path $resolvedOutputDir 'SHA256SUMS.txt'
-
 try {
+    $bundledExePath = ''
+    if (-not $ExcludeDesktopExe) {
+        if (-not [string]::IsNullOrWhiteSpace($DesktopExePath)) {
+            $rawExe = $DesktopExePath
+            if (-not [IO.Path]::IsPathRooted($rawExe)) {
+                $rawExe = Join-Path (Get-Location).Path $rawExe
+            }
+            $candidateExe = [IO.Path]::GetFullPath($rawExe)
+            if (-not (Test-Path -LiteralPath $candidateExe -PathType Leaf)) {
+                throw "DesktopExePath does not exist or is not a file: $candidateExe"
+            }
+            $exeItem = Get-Item -LiteralPath $candidateExe -Force
+            if (($exeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to package reparse point DesktopExePath: $candidateExe"
+            }
+            $bundledExePath = $candidateExe
+        } else {
+            $guiProgramPath = Join-Path $resolvedSourceRoot 'src\Gui\Program.cs'
+            $buildDesktopScriptPath = Join-Path $resolvedSourceRoot 'scripts\Build-DesktopApp.ps1'
+            if ((Test-Path -LiteralPath $guiProgramPath -PathType Leaf) -and (Test-Path -LiteralPath $buildDesktopScriptPath -PathType Leaf)) {
+                $tempBase = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } else { [IO.Path]::GetTempPath() }
+                $tempExeBuildDir = Join-Path $tempBase ('claude-release-exe-' + [Guid]::NewGuid().ToString('N'))
+                $tempExeOut = Join-Path $tempExeBuildDir 'Claude-Residual-ID-Cleaner.exe'
+                New-Item -ItemType Directory -Path $tempExeBuildDir -Force | Out-Null
+
+                $buildResult = & $buildDesktopScriptPath -SourceDir (Join-Path $resolvedSourceRoot 'src\Gui') -OutputPath $tempExeOut
+                if ($null -eq $buildResult -or -not $buildResult.Succeeded -or -not (Test-Path -LiteralPath $tempExeOut -PathType Leaf)) {
+                    throw 'Failed to compile Claude-Residual-ID-Cleaner.exe for release packaging.'
+                }
+                $tempExeItem = Get-Item -LiteralPath $tempExeOut -Force
+                if (($tempExeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    throw "Refusing to package reparse point desktop executable: $tempExeOut"
+                }
+                $bundledExePath = $tempExeOut
+            }
+        }
+    }
+
+    if (-not [string]::IsNullOrEmpty($bundledExePath)) {
+        $includedEntries.Add([pscustomobject]@{
+            FullName     = $bundledExePath
+            RelativePath = 'Claude-Residual-ID-Cleaner.exe'
+        })
+    }
+
+    $sortedIncluded = @($includedEntries | Sort-Object -Property RelativePath)
+    if ($sortedIncluded.Count -eq 0) {
+        throw "No eligible files found to package in '$resolvedSourceRoot'."
+    }
+
+    if (-not (Test-Path -LiteralPath $resolvedOutputDir)) {
+        New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
+    }
+
+    $zipFileName = "$PackageName-$Version.zip"
+    $zipPath = Join-Path $resolvedOutputDir $zipFileName
+    $tempZipPath = Join-Path $resolvedOutputDir ("$zipFileName.tmp-" + [Guid]::NewGuid().ToString('N'))
+    $sumsPath = Join-Path $resolvedOutputDir 'SHA256SUMS.txt'
+
     $archive = [System.IO.Compression.ZipFile]::Open($tempZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
     try {
         foreach ($item in $sortedIncluded) {
@@ -218,8 +271,11 @@ try {
     }
     [IO.File]::Move($tempZipPath, $zipPath)
 } finally {
-    if (Test-Path -LiteralPath $tempZipPath) {
+    if (-not [string]::IsNullOrEmpty($tempZipPath) -and (Test-Path -LiteralPath $tempZipPath)) {
         try { [IO.File]::Delete($tempZipPath) } catch {}
+    }
+    if (-not [string]::IsNullOrEmpty($tempExeBuildDir) -and (Test-Path -LiteralPath $tempExeBuildDir)) {
+        try { Remove-Item -LiteralPath $tempExeBuildDir -Recurse -Force } catch {}
     }
 }
 

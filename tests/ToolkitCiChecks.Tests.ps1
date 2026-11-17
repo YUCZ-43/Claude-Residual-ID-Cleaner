@@ -94,6 +94,15 @@ try {
     Assert-True (($ciYaml -match '\*\.Tests\.ps1') -and ($ciYaml -match '-Help') -and ($ciYaml -match '-Verify -OutputFormat Json')) 'CI workflow runs read-only CLI checks and full *.Tests.ps1 test suites'
     Assert-True (($ciYaml -match 'GITHUB_STEP_SUMMARY') -and ($ciYaml -match 'CI_TEST_TOTALS') -and ($ciYaml -match 'not counted as Passed') -and ($ciYaml -match 'totalSkipped') -and ($ciYaml -match 'totalNotExecuted')) 'CI workflow visibly reports Skipped and NotExecuted without counting them as Passed'
     Assert-True (($ciYaml -match 'LINK_CHECK_OK') -and ($ciYaml -match 'PRIVACY_CHECK_OK') -and ($ciYaml -match 'GIT_HYGIENE_OK')) 'CI workflow enforces Markdown link, privacy, and git hygiene checks'
+    Assert-True (
+        ($ciYaml -match '(?m)^\s+release-artifacts:\s*$') -and
+        ($ciYaml -match '(?m)^\s+needs:\s*test\s*$') -and
+        ($ciYaml -match 'actions/upload-artifact@v4') -and
+        ($ciYaml -match 'claude-residual-id-cleaner-exe') -and
+        ($ciYaml -match 'claude-cleanup-release-bundle') -and
+        ($ciYaml -match 'Claude-Residual-ID-Cleaner\.exe') -and
+        ($ciYaml -match 'New-ReleasePackage\.ps1')
+    ) 'CI workflow includes release-artifacts job building standalone .exe, release ZIP, SHA256SUMS.txt, and actions/upload-artifact@v4'
     Assert-True (($ciYaml -notmatch 'ExecutionPolicy\s+Bypass') -and ($ciYaml -notmatch '\s-Apply\b') -and ($ciYaml -notmatch 'Remove-AppxPackage') -and ($ciYaml -notmatch 'npm\s+uninstall')) 'CI workflow never invokes ExecutionPolicy Bypass or destructive uninstall/apply commands'
 
     # Sandboxed CI behavior simulation inside tests/sandbox/ci/
@@ -290,25 +299,105 @@ try {
     Assert-Throws { & $releaseScriptPath -SourceRoot $leakRepo -OutputDirectory $leakOut -Version '0.0.1-leak' } 'New-ReleasePackage.ps1 fails closed when included file contains a user SID'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $leakOut 'claude-cleanup-0.0.1-leak.zip'))) 'Failed privacy gate leaves no release ZIP behind'
 
-    # 6. Repository Stage I bilingual README swap and zero-emoji hygiene checks
+    # 5b. Sandboxed repo snapshot with src/Gui/* + scripts/Build-DesktopApp.ps1 bundles Claude-Residual-ID-Cleaner.exe at archive root
+    $exeFakeRepo = Join-Path $releaseSandbox 'fake-exe-repo'
+    $exeGuiDir = Join-Path $exeFakeRepo 'src\Gui'
+    $exeScriptsDir = Join-Path $exeFakeRepo 'scripts'
+    $exeCustomOut = Join-Path $releaseSandbox 'exe-custom-out'
+    New-Item -ItemType Directory -Path $exeGuiDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $exeScriptsDir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $exeFakeRepo 'README.md'), '# Sandboxed Desktop Bundle Test')
+    [IO.File]::Copy((Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1'), (Join-Path $exeScriptsDir 'Build-DesktopApp.ps1'), $true)
+    [IO.File]::Copy($releaseScriptPath, (Join-Path $exeScriptsDir 'New-ReleasePackage.ps1'), $true)
+    foreach ($csItem in @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src\Gui') -Filter '*.cs' -File)) {
+        [IO.File]::Copy($csItem.FullName, (Join-Path $exeGuiDir $csItem.Name), $true)
+    }
+
+    $exePkgResult = & $releaseScriptPath -SourceRoot $exeFakeRepo -OutputDirectory $exeCustomOut -Version '1.2.3-exe'
+    Assert-True ((Test-Path -LiteralPath $exePkgResult.PackagePath -PathType Leaf) -and (-not (Test-Path -LiteralPath (Join-Path $exeFakeRepo 'dist')))) 'New-ReleasePackage.ps1 with src/Gui/* builds release ZIP into custom OutputDirectory without writing to SourceRoot/dist'
+
+    $exeZipEntries = New-Object 'System.Collections.Generic.List[string]'
+    $exeZipRead = [System.IO.Compression.ZipFile]::OpenRead($exePkgResult.PackagePath)
+    try {
+        foreach ($entry in $exeZipRead.Entries) {
+            $exeZipEntries.Add($entry.FullName)
+        }
+    } finally {
+        $exeZipRead.Dispose()
+    }
+    Assert-True ($exeZipEntries -contains 'Claude-Residual-ID-Cleaner.exe') 'Release ZIP bundles compiled Claude-Residual-ID-Cleaner.exe at archive root'
+
+    # 6. Repository Stage I/J bilingual docs, UI screenshot PNGs, relative links, and zero-emoji hygiene checks
     $utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
     $rootReadmePath = Join-Path $repoRoot 'README.md'
     $enReadmePath = Join-Path $repoRoot 'README.en.md'
     $legacyZhReadmePath = Join-Path $repoRoot 'README_zh-CN.md'
+    $skillsGuideZhPath = Join-Path $repoRoot 'docs\Skills-Usage-Guide.md'
+    $skillsGuideEnPath = Join-Path $repoRoot 'docs\Skills-Usage-Guide.en.md'
     $rootReadmeText = $utf8Strict.GetString([IO.File]::ReadAllBytes($rootReadmePath))
     $enReadmeText = $utf8Strict.GetString([IO.File]::ReadAllBytes($enReadmePath))
+    $skillsGuideZhText = $utf8Strict.GetString([IO.File]::ReadAllBytes($skillsGuideZhPath))
+    $skillsGuideEnText = $utf8Strict.GetString([IO.File]::ReadAllBytes($skillsGuideEnPath))
     $emojiRegex = '[\u2600-\u27BF]|[\uD800-\uDBFF][\uDC00-\uDFFF]'
     Assert-True (
         (Test-Path -LiteralPath $rootReadmePath -PathType Leaf) -and
         (Test-Path -LiteralPath $enReadmePath -PathType Leaf) -and
+        (Test-Path -LiteralPath $skillsGuideZhPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $skillsGuideEnPath -PathType Leaf) -and
         (-not (Test-Path -LiteralPath $legacyZhReadmePath)) -and
         ($rootReadmeText.StartsWith('简体中文 | [English](README.en.md)')) -and
         ($enReadmeText.StartsWith('[简体中文](README.md) | English')) -and
         ($rootReadmeText -notmatch $emojiRegex) -and
         ($enReadmeText -notmatch $emojiRegex) -and
+        ($skillsGuideZhText -notmatch $emojiRegex) -and
+        ($skillsGuideEnText -notmatch $emojiRegex) -and
         (-not $rootReadmeText.Contains([char]0xFFFD)) -and
-        (-not $enReadmeText.Contains([char]0xFFFD))
-    ) 'Primary README.md is Simplified Chinese, README.en.md is English, legacy README_zh-CN.md is removed, and zero emojis exist'
+        (-not $enReadmeText.Contains([char]0xFFFD)) -and
+        (-not $skillsGuideZhText.Contains([char]0xFFFD)) -and
+        (-not $skillsGuideEnText.Contains([char]0xFFFD))
+    ) 'Primary README.md, README.en.md, and Skills-Usage-Guide*.md exist with zero emojis and clean UTF-8'
+
+    $requiredPngs = @('ui-main-zh.png', 'ui-scan-results-zh.png', 'ui-main-en.png')
+    $allPngsValid = $true
+    foreach ($pngName in $requiredPngs) {
+        $pngPath = Join-Path $repoRoot ("docs\images\$pngName")
+        if (-not (Test-Path -LiteralPath $pngPath -PathType Leaf)) {
+            $allPngsValid = $false
+            continue
+        }
+        $pBytes = [IO.File]::ReadAllBytes($pngPath)
+        $isValidPng = ($pBytes.Length -gt 20480 -and
+            $pBytes[0] -eq 0x89 -and $pBytes[1] -eq 0x50 -and $pBytes[2] -eq 0x4E -and $pBytes[3] -eq 0x47 -and
+            $pBytes[4] -eq 0x0D -and $pBytes[5] -eq 0x0A -and $pBytes[6] -eq 0x1A -and $pBytes[7] -eq 0x0A)
+        if (-not $isValidPng) {
+            $allPngsValid = $false
+        }
+    }
+    Assert-True $allPngsValid 'All embedded UI screenshot PNGs exist under docs/images/ (>20 KB, valid PNG header)'
+
+    $docLinkFiles = @($rootReadmePath, $enReadmePath, $skillsGuideZhPath, $skillsGuideEnPath)
+    $allDocLinksOk = $true
+    $docLinksChecked = 0
+    foreach ($docFile in $docLinkFiles) {
+        $docDir = Split-Path -Parent $docFile
+        $docRaw = $utf8Strict.GetString([IO.File]::ReadAllBytes($docFile))
+        $docStripped = [regex]::Replace($docRaw, '(?ms)```.*?```', '')
+        $docStripped = [regex]::Replace($docStripped, '`[^`\r\n]+`', '')
+        $linkMatches = [regex]::Matches($docStripped, '!?\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)')
+        foreach ($m in $linkMatches) {
+            $target = $m.Groups[1].Value
+            if ($target -match '^(?:https?://|mailto:|#)') { continue }
+            $cleanTarget = ($target -split '[#?]')[0]
+            if ([string]::IsNullOrWhiteSpace($cleanTarget)) { continue }
+            $resolvedTarget = [IO.Path]::GetFullPath((Join-Path $docDir ($cleanTarget -replace '/', '\')))
+            $docLinksChecked++
+            if (-not $resolvedTarget.StartsWith($repoRoot, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $resolvedTarget)) {
+                Write-Warning "Broken Markdown/image link in ${docFile}: $target -> $resolvedTarget"
+                $allDocLinksOk = $false
+            }
+        }
+    }
+    Assert-True ($docLinksChecked -ge 20 -and $allDocLinksOk) "README.md, README.en.md, and docs/Skills-Usage-Guide*.md resolve all $docLinksChecked relative and image links cleanly"
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; 0 failed"
 } finally {

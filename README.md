@@ -1,8 +1,10 @@
-简体中文 | [English](README.en.md)
+简体中文 | [English](README.en.md) | [跨代理 Skill 实战指南](docs/Skills-Usage-Guide.md) | [Skill Guide (EN)](docs/Skills-Usage-Guide.en.md)
 
 # claude-cleanup (`Claude 账号残余 ID 清理工具 / Claude Residual ID Cleaner`)
 
 **claude-cleanup**（桌面应用：**Claude 账号残余 ID 清理工具 / Claude Residual ID Cleaner**）是一套面向 Windows 用户的非破坏性独立桌面软件（`Claude-Residual-ID-Cleaner.exe`）与原生 PowerShell 清理工具集，专为扫描并安全清理 Claude 封号后残留在本地设备中的账号/设备 ID、认证 Token 与会话缓存而设计，**绝不改动 Windows 操作系统本身**。
+
+![Claude 账号残余 ID 清理工具桌面端主界面（简体中文）](docs/images/ui-main-zh.png)
 
 ---
 
@@ -56,23 +58,45 @@
 
 ### 3.2 方式一：独立 Windows 桌面应用（`Claude-Residual-ID-Cleaner.exe`，无控制台黑框）
 
+#### 获取与免编译直接运行（GitHub Releases / GitHub Actions Artifacts）
+
+普通 Windows 用户无需安装开发工具或手动编译：
+
+1. 前往仓库 **GitHub Releases** 页面，或打开最新 **GitHub Actions** CI 运行记录底部的 **Artifacts** 区域：
+   - **完整发布归档（推荐）**：下载 `claude-cleanup-release-bundle`（内含 `claude-cleanup-<Version>.zip` 与 `SHA256SUMS.txt`）。归档根目录已直接打包 `Claude-Residual-ID-Cleaner.exe` 与核心引擎 `ClaudeCleanup.ps1`。
+   - **单文件桌面应用**：也可单独下载 `claude-residual-id-cleaner-exe`（内含 `Claude-Residual-ID-Cleaner.exe`），需将其置于包含 `ClaudeCleanup.ps1` 的工具根目录（或 `dist\` 子目录）下运行。
+2. 校验压缩包 SHA-256（可选但推荐）：
+   ```powershell
+   Get-FileHash .\claude-cleanup-0.1.0.zip -Algorithm SHA256
+   ```
+3. 将 `claude-cleanup-<Version>.zip` 解压至任意本地目录后，**直接双击 `Claude-Residual-ID-Cleaner.exe`** 即可启动原生 WPF 桌面工作台（零控制台黑框）。
+
+#### 本地离线编译与打包（从源码构建）
+
 源码位于 [src/Gui/](src/Gui/)，直接利用 Windows 10/11 内置 `.NET Framework 4.x` 编译器（`csc.exe`）离线生成单文件纯 GUI 可执行程序（`IMAGE_SUBSYSTEM_WINDOWS_GUI`）：
 
 ```powershell
-# 1. 本地离线编译生成单文件桌面应用
+# 1. 本地离线编译生成单文件桌面应用 -> .\dist\Claude-Residual-ID-Cleaner.exe
 .\scripts\Build-DesktopApp.ps1
 
 # 2. 启动独立桌面软件
 .\dist\Claude-Residual-ID-Cleaner.exe
+
+# 3. （可选）生成包含 Claude-Residual-ID-Cleaner.exe 的发布压缩包与 SHA256SUMS.txt
+.\scripts\New-ReleasePackage.ps1
 ```
 
-桌面界面工作流（严格遵循四步只读优先防误删设计）：
+#### 桌面界面工作流与演示视图
+
+![Claude 账号残余 ID 清理工具扫描结果视图（演示审计模式）](docs/images/ui-scan-results-zh.png)
+
+桌面界面严格遵循四步只读优先防误删设计：
 1. **选择扫描范围与策略**：勾选 5 类扫描目标，选择 `AccountData` 或 `FullRemoval`。
 2. **`1. 立即扫描体检`**：只读调用 `ClaudeCleanup.ps1 -Audit -OutputFormat Json`，在表格中展示发现的每项路径、状态与决策说明。
 3. **`2. 预览清理方案`**：生成确定性 `CLEANUP-PLAN.md` 并计算 64 位 SHA-256 哈希；在生成有效 `Ready` 项前，`3. 一键安全清理` 按钮保持锁定禁用。
 4. **`3. 一键安全清理` & `4. 清理结果核验`**：点击清理会先弹出完整目标路径、策略与 SHA-256 最终确认弹窗（不可撤销提示），确认后方可通过 `ClaudeCleanup.ps1 -Apply` 执行，并可点击核验查看 `VERIFICATION.md` 执行台账；内置“打开报告目录”与“导出诊断摘要 (`AUDIT.md`)”。
 
-> 如需免编译直接运行图形界面，也可双击根目录的 [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd)（基于 [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1) 原生 WinForms 界面）。
+> 如需免编译直接运行脚本版界面，也可双击根目录的 [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd)（基于 [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1) 原生 WinForms 界面）。可使用 [scripts/Capture-UiScreenshots.ps1](scripts/Capture-UiScreenshots.ps1) 非破坏性复现上述 `--demo-audit --capture-png` 界面截图。
 
 ### 3.3 方式二：交互式安全控制台启动器
 
@@ -106,7 +130,7 @@
   powershell.exe -NoProfile -File .\scripts\Update-ClaudeCleanup.ps1
   powershell.exe -NoProfile -File .\scripts\Uninstall-ClaudeCleanup.ps1
   ```
-- **跨代理 Agent Skill（[skills/claude-cleanup/](skills/claude-cleanup/)）**：支持 Codex CLI（`~/.codex/skills/` / `~/.agents/skills/`）、Antigravity CLI（`~/.gemini/config/skills/`）、Gemini CLI（`~/.gemini/skills/`）与 Claude Code（`~/.claude/skills/`）。详见 [技能规范](skills/claude-cleanup/SKILL.md)、[多代理安装指南](skills/claude-cleanup/references/agent-installation.md) 与 [技能生态系统指南](docs/Agent-Skill-Guide.md)。
+- **跨代理 Agent Skill（[skills/claude-cleanup/](skills/claude-cleanup/)）**：支持 Antigravity（`~/.gemini/config/skills/`）、Codex CLI（`~/.codex/skills/` / `~/.agents/skills/`）、Gemini CLI（`~/.gemini/skills/`）与 Claude Code（`~/.claude/skills/`）。**完整安装、触发技巧与自然语言提示词模板请直接查阅 [跨代理 Agent Skill 实战使用指南](docs/Skills-Usage-Guide.md)**（[English Guide](docs/Skills-Usage-Guide.en.md)），另见 [技能规范](skills/claude-cleanup/SKILL.md)、[多代理安装指南](skills/claude-cleanup/references/agent-installation.md) 与 [技能生态系统指南](docs/Agent-Skill-Guide.md)。
 
 ---
 
@@ -117,6 +141,8 @@
 - **独立 WPF 桌面应用（`Claude-Residual-ID-Cleaner.exe`）与 WinForms GUI**：启动时依据 Windows 系统区域自动默认界面语言（中文 Windows 自动显示简体中文），点击右上角 **`中文 / English`** 按钮即可零重启实时切换全界面文案、表格表头、确认弹窗与安全提示。
 - **CLI 与启动器运行时切换**：通过 `-Language Auto|zh-CN|en-US` 参数指定或切换语言；`Auto` 模式根据当前系统 UI 语言自动选择中文或英文，并在 Windows PowerShell 5.1 / 7+ 中自动设置 UTF-8 控制台编码避免中文乱码。
 - **报告本地化与 Schema 不变性**：`AUDIT.md`、`CLEANUP-PLAN.md` 与 `VERIFICATION.md` 支持本地化标题与说明文本，同时 `-OutputFormat Json`（`SchemaVersion = 3`）的所有 JSON 字段名在任何语言下保持严格一致，确保自动化脚本与桌面 UI 稳定解析。
+
+![Claude Residual ID Cleaner 英文实时切换界面](docs/images/ui-main-en.png)
 
 ---
 

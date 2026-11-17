@@ -82,6 +82,12 @@ foreach ($r in $refs) {
 }
 $cscArgs.Add($locCs)
 $cscArgs.Add($progCs)
+$extraCsFiles = @(Get-ChildItem -LiteralPath $resolvedSourceDir -Filter '*.cs' -File | Sort-Object Name)
+foreach ($csFile in $extraCsFiles) {
+    if ($csFile.FullName -ne $locCs -and $csFile.FullName -ne $progCs) {
+        $cscArgs.Add($csFile.FullName)
+    }
+}
 
 $outputLines = & $cscExe @($cscArgs.ToArray()) 2>&1
 if ($LASTEXITCODE -ne 0) {

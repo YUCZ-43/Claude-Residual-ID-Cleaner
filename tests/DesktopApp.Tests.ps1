@@ -5,6 +5,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildScript = Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1'
 $locCs = Join-Path $repoRoot 'src\Gui\Localization.cs'
 $progCs = Join-Path $repoRoot 'src\Gui\Program.cs'
+$asmInfoCs = Join-Path $repoRoot 'src\Gui\AssemblyInfo.cs'
 
 $sandboxRoot = Join-Path $PSScriptRoot 'sandbox'
 $sandboxExisted = Test-Path -LiteralPath $sandboxRoot
@@ -50,7 +51,7 @@ function Get-PeSubsystemType {
 
 try {
     # 1. Source & build script existence and AST parse checks
-    Assert-True ((Test-Path -LiteralPath $buildScript -PathType Leaf) -and (Test-Path -LiteralPath $locCs -PathType Leaf) -and (Test-Path -LiteralPath $progCs -PathType Leaf)) 'Desktop GUI source files and Build-DesktopApp.ps1 exist'
+    Assert-True ((Test-Path -LiteralPath $buildScript -PathType Leaf) -and (Test-Path -LiteralPath $locCs -PathType Leaf) -and (Test-Path -LiteralPath $progCs -PathType Leaf) -and (Test-Path -LiteralPath $asmInfoCs -PathType Leaf)) 'Desktop GUI source files (incl. AssemblyInfo.cs) and Build-DesktopApp.ps1 exist'
 
     foreach ($psFile in @($buildScript, $PSCommandPath)) {
         $errs = $null
@@ -61,6 +62,20 @@ try {
     # 2. Static security & localization completeness checks on C# sources
     $locText = [IO.File]::ReadAllText($locCs, [System.Text.Encoding]::UTF8)
     $progText = [IO.File]::ReadAllText($progCs, [System.Text.Encoding]::UTF8)
+    $asmInfoText = [IO.File]::ReadAllText($asmInfoCs, [System.Text.Encoding]::UTF8)
+
+    Assert-True (
+        ($asmInfoText -match 'AssemblyProduct\("claude-cleanup"\)') -and
+        ($asmInfoText -match 'AssemblyTitle\("Claude Residual ID Cleaner"\)') -and
+        ($asmInfoText -match 'AssemblyVersion\(')
+    ) 'AssemblyInfo.cs defines product, title, and version metadata for standalone .exe'
+
+    Assert-True (
+        ($progText -match '#1E1E1E') -and
+        ($progText -match '#252526') -and
+        ($progText -match '#2D2D30') -and
+        ($progText -match 'ThemeStyle\s*=\s*"AdobeDarkSlate"')
+    ) 'Desktop WPF source defines Adobe dark slate theme palette and ThemeStyle contract'
 
     Assert-True (
         ($progText -notmatch 'ExecutionPolicy\s*(Bypass|Unrestricted)|RegDeleteKeyW|SetFileInformationByHandle|NtDeleteKey|Remove-Item|Verb\s*=\s*"RunAs"') -and
@@ -79,10 +94,11 @@ try {
         ($locText -match '绝不改动 Windows 系统') -and
         ($locText -match 'Never Alters Windows OS') -and
         (-not $locText.Contains([char]0xFFFD)) -and
-        (-not $progText.Contains([char]0xFFFD))
+        (-not $progText.Contains([char]0xFFFD)) -and
+        (-not $asmInfoText.Contains([char]0xFFFD))
     ) 'Bilingual positioning promise present in zh-CN & en-US without UTF-8 replacement characters'
 
-    $combinedCs = $locText + "`n" + $progText
+    $combinedCs = $locText + "`n" + $progText + "`n" + $asmInfoText
     $sidPattern = 'S-1-5-21-' + '\d+-\d+-\d+-\d+'
     $userPathPattern = '(?i)C:\\Users\\(?!(?:<USERNAME>|<USER>|<name>|username|user|example|Public|Default)(?:[\\"`\s]|$))[A-Za-z0-9._-]+\\'
     Assert-True (($combinedCs -notmatch $sidPattern) -and ($combinedCs -notmatch $userPathPattern)) 'Desktop C# sources contain zero local user paths or Windows SIDs'
@@ -108,19 +124,50 @@ try {
         $jZh.ToggledLanguage -eq 'en-US' -and
         $jZh.ScopeCheckboxCount -eq 5 -and
         $jZh.DataGridColumnCount -eq 5 -and
+        $jZh.NavTabCount -eq 5 -and
+        $jZh.MetricCardCount -eq 4 -and
+        $jZh.ThemeStyle -eq 'AdobeDarkSlate' -and
         (-not $jZh.InitialCleanButtonEnabled) -and
         $jZh.BackendFound -and
         $jZh.DryRun -and
         ($jZh.InitialSafetyPill -match '绝不改动 Windows 系统') -and
         ($jZh.ToggledSafetyPill -match 'Never Alters Windows OS')
-    ) 'Compiled WPF .exe validates zh-CN default, live zh-CN->en-US switch, 5 checklist items, 5 DataGrid columns, and disabled Clean button'
+    ) 'Compiled WPF .exe validates zh-CN default, AdobeDarkSlate (5 nav tabs, 4 metric cards), live switch, 5 checklist items, 5 DataGrid columns, and disabled Clean button'
 
     # 6. Execute compiled .exe reverse toggle (en-US -> zh-CN)
     $outEn = Join-Path $appSandbox 'selftest-en.json'
     $pEn = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --dry-run --language en-US --toolkit-root `"$repoRoot`" --self-test `"$outEn`"")
     $pEn.WaitForExit()
     $jEn = [IO.File]::ReadAllText($outEn, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-    Assert-True ($pEn.ExitCode -eq 0 -and $jEn.InitialLanguage -eq 'en-US' -and $jEn.ToggledLanguage -eq 'zh-CN') 'Compiled WPF .exe validates live en-US->zh-CN toggle'
+    Assert-True (
+        $pEn.ExitCode -eq 0 -and
+        $jEn.InitialLanguage -eq 'en-US' -and
+        $jEn.ToggledLanguage -eq 'zh-CN' -and
+        $jEn.NavTabCount -eq 5 -and
+        $jEn.MetricCardCount -eq 4 -and
+        $jEn.ThemeStyle -eq 'AdobeDarkSlate'
+    ) 'Compiled WPF .exe validates live en-US->zh-CN toggle and AdobeDarkSlate layout metrics'
+
+    # 7. Non-destructive --demo-audit --capture-png render inside tests/sandbox/desktop-app/
+    $demoPng = Join-Path $appSandbox 'demo-audit-capture.png'
+    $pCap = [System.Diagnostics.Process]::Start($sandboxExe, "--demo-audit --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$demoPng`"")
+    $pCap.WaitForExit()
+    $pngValid = $false
+    $pngLen = 0
+    if ($pCap.ExitCode -eq 0 -and (Test-Path -LiteralPath $demoPng -PathType Leaf)) {
+        $pngBytes = [IO.File]::ReadAllBytes($demoPng)
+        $pngLen = $pngBytes.Length
+        $hasMagic = ($pngLen -gt 20480 -and
+            $pngBytes[0] -eq 0x89 -and $pngBytes[1] -eq 0x50 -and $pngBytes[2] -eq 0x4E -and $pngBytes[3] -eq 0x47 -and
+            $pngBytes[4] -eq 0x0D -and $pngBytes[5] -eq 0x0A -and $pngBytes[6] -eq 0x1A -and $pngBytes[7] -eq 0x0A)
+        $hasIhdr = ($pngLen -ge 24 -and $pngBytes[12] -eq 0x49 -and $pngBytes[13] -eq 0x48 -and $pngBytes[14] -eq 0x44 -and $pngBytes[15] -eq 0x52)
+        if ($hasMagic -and $hasIhdr) {
+            $pngW = ([int]$pngBytes[16] -shl 24) -bor ([int]$pngBytes[17] -shl 16) -bor ([int]$pngBytes[18] -shl 8) -bor [int]$pngBytes[19]
+            $pngH = ([int]$pngBytes[20] -shl 24) -bor ([int]$pngBytes[21] -shl 16) -bor ([int]$pngBytes[22] -shl 8) -bor [int]$pngBytes[23]
+            $pngValid = ($pngW -gt 0 -and $pngH -gt 0)
+        }
+    }
+    Assert-True $pngValid "Compiled WPF .exe --demo-audit --capture-png produces valid PNG >20 KB in sandbox ($pngLen bytes)"
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; $($failedList.Count) failed"
     if ($failedList.Count -gt 0) { exit 1 }

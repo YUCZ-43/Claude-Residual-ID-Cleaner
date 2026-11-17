@@ -30,12 +30,13 @@ namespace ClaudeResidualIdCleaner
             if (zh)
             {
                 d["AppTitle"] = "Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner) v1.0";
-                d["HeaderTitle"] = "Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner)";
-                d["VersionBadge"] = "v1.0 · 原生 WPF 独立桌面版";
-                d["SafetyPill"] = "仅清理 Claude 封号残余数据 · 绝不改动 Windows 系统";
+                d["BrandName"] = "claude-cleanup";
+                d["HeaderTitle"] = "Claude 账号残余 ID 清理工具";
+                d["VersionBadge"] = "v1.0 · 原生 WPF Studio";
+                d["SafetyPill"] = "仅清理 Claude 封号残余 · 绝不改动 Windows 系统";
                 d["Positioning"] = "专为清理 Claude 封号后残留在设备中的账号/设备 ID、认证 Token 与会话缓存而设计，绝不改动 Windows 系统本身。";
-                d["LangButton"] = "中文 / English (当前: 简体中文)";
-                d["AboutButton"] = "关于与安全承诺";
+                d["LangButton"] = "简体中文 / English";
+                d["AboutButton"] = "安全边界";
                 d["AboutTitle"] = "关于与安全边界承诺";
                 d["AboutBody"] =
                     "claude-cleanup — Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner)\r\n\r\n" +
@@ -46,12 +47,32 @@ namespace ClaudeResidualIdCleaner
                     "2. 所有清理严格通过 ClaudeCleanup.ps1 白名单与 Win32 句柄安全引擎执行；\r\n" +
                     "3. 不修改 Windows 系统文件、WSL、浏览器个人配置、系统硬件 ID 或远端账号状态；\r\n" +
                     "4. Credential Manager 与环境变量仅作只读数量/名称核查，绝不窃取或外传秘密值。";
+                d["SidebarSectionTitle"] = "工作区导航";
+                d["NavScan"] = "1. 残余扫描体检";
+                d["NavPlan"] = "2. 清理方案预览";
+                d["NavClean"] = "3. 安全清理执行";
+                d["NavVerify"] = "4. 核验与报告";
+                d["NavAbout"] = "5. 关于与安全边界";
+                d["SidebarGuardTitle"] = "引擎安全护栏";
+                d["SidebarGuardBody"] = "独立委托 ClaudeCleanup.ps1 执行\r\n默认只读 · 句柄校验 · 绝不改动 Windows 系统";
+                d["PolicyPillPrefix"] = "策略: ";
+                d["PolicyAccountShort"] = "AccountData";
+                d["PolicyFullShort"] = "FullRemoval";
+                d["MetricScannedTitle"] = "已扫描目标";
+                d["MetricScannedSub"] = "白名单引擎检测项目数";
+                d["MetricFoundTitle"] = "发现残余项";
+                d["MetricFoundSub"] = "含可清理及只读核查项";
+                d["MetricSizeTitle"] = "预计释放空间";
+                d["MetricSizeSub"] = "基于树状快照字节统计";
+                d["MetricSafetyTitle"] = "OS 安全状态";
+                d["MetricSafetyValue"] = "已受保护";
+                d["MetricSafetySub"] = "绝不改动 Windows 系统";
                 d["ScopeHeader"] = "扫描与清理目标范围 (基于核心引擎严格白名单)";
-                d["ChkCli"] = "1. Claude Code CLI 配置与设备/账号 ID (~/.claude, .claude.json, npm/global state)";
+                d["ChkCli"] = "1. Claude Code CLI 配置与设备/账号 ID (~/.claude, .claude.json, npm/global)";
                 d["ChkDesktop"] = "2. Claude Desktop 客户端会话与本地存储 (%APPDATA%\\Claude, %LOCALAPPDATA%\\Claude)";
-                d["ChkVsCode"] = "3. VS Code / Cursor 扩展残余缓存 (globalStorage / workspaceStorage Claude entries)";
-                d["ChkCred"] = "4. Windows 凭据管理器中的 Claude 登录凭据 (Credential Manager Claude targets · 只读计数)";
-                d["ChkEnv"] = "5. Claude 相关用户环境变量 (ANTHROPIC_* / CLAUDE_* user env vars · 仅报名称)";
+                d["ChkVsCode"] = "3. VS Code / Cursor 扩展与浏览器 Host (extensions / NativeMessagingHosts)";
+                d["ChkCred"] = "4. Windows 凭据管理器 Claude 凭据 (Credential Manager · 只读计数)";
+                d["ChkEnv"] = "5. Claude 相关用户环境变量 (ANTHROPIC_* / CLAUDE_* · 仅报名称)";
                 d["PolicyHeader"] = "清理策略";
                 d["PolicyAccount"] = "AccountData (清除登录/设备缓存与日志，保留 .claude 自建配置)";
                 d["PolicyFull"] = "FullRemoval (彻底移除用户级 Claude 客户端、扩展、配置与注册项)";
@@ -60,7 +81,29 @@ namespace ClaudeResidualIdCleaner
                 d["BtnClean"] = "3. 一键安全清理";
                 d["BtnVerify"] = "4. 清理结果核验";
                 d["BtnOpenFolder"] = "打开报告目录";
-                d["BtnExportSummary"] = "导出诊断摘要 (AUDIT.md)";
+                d["BtnExportSummary"] = "导出 AUDIT.md";
+                d["BtnToggleLogs"] = "日志抽屉";
+                d["LogDrawerTitle"] = "实时执行日志 · ClaudeCleanup.ps1 独立进程输出";
+                d["GridEmptyHint"] = "尚未执行扫描 — 请点击“1. 立即扫描体检”进行只读检测。";
+                d["DemoBanner"] = "演示审计模式 (--demo-audit)：当前展示脱敏模拟封号残余清单，未读取本机真实隐私数据，亦未改动系统。";
+                d["NavBannerScan"] = "步骤 1 · 残余扫描体检：勾选要检测的 Claude 残余范围，点击“1. 立即扫描体检”进行 100% 只读审计。";
+                d["NavBannerPlan"] = "步骤 2 · 清理方案预览：生成带唯一 64 位 SHA-256 指纹的确定性清理方案 (CLEANUP-PLAN.md)。";
+                d["NavBannerClean"] = "步骤 3 · 安全清理执行：清理按钮默认锁定，仅在扫描并生成 Ready 方案后解锁，且强制 -WhatIf 预览与弹窗确认。";
+                d["NavBannerVerify"] = "步骤 4 · 核验与报告：核对清理后残留状态、VERIFICATION.md 执行台账或导出脱敏 AUDIT.md。";
+                d["NavBannerAbout"] = "步骤 5 · 关于与安全边界：查看 claude-cleanup 单一后端架构、Win32 句柄安全引擎与版本元数据。";
+                d["SafetyViewTitle"] = "安全架构与边界承诺";
+                d["SafetyViewSubtitle"] = "本桌面端仅作为展示与编排界面，所有检测与清理均严格委托给唯一后端引擎 ClaudeCleanup.ps1。";
+                d["SafetyCard1Title"] = "1. 默认 100% 只读与双阶段确认锁";
+                d["SafetyCard1Body"] = "程序启动零改动。清理按钮默认禁用，必须先完成只读扫描并生成包含 Ready 项的 SHA-256 方案后才会解锁，且执行前强制执行 -WhatIf 预览并弹出明确路径清单确认。";
+                d["SafetyCard2Title"] = "2. 单一后端委托与 Win32 句柄删除";
+                d["SafetyCard2Body"] = "界面层不内置任何文件或注册表删除代码，所有动作以独立进程调用 ClaudeCleanup.ps1，启用重解析点拒绝、当前用户 SID 校验与 HKCU 精确白名单。";
+                d["SafetyCard3Title"] = "3. 隐私边界与只读凭据/变量核查";
+                d["SafetyCard3Body"] = "Windows 凭据管理器仅报告 Claude* 目标计数，环境变量仅报告变量名称（如 ANTHROPIC_* / CLAUDE_*），绝不读取或记录任何密钥、Token 原文或无关个人资料。";
+                d["SafetyCard4Title"] = "4. 版本与开源项目信息";
+                d["SafetyCard4Body"] = "产品名称：claude-cleanup (Claude Residual ID Cleaner) v1.0.0.0\r\n运行架构：.NET Framework 4.x 原生 WPF 零控制台桌面端 (IMAGE_SUBSYSTEM_WINDOWS_GUI)\r\n项目仓库：https://github.com/YUCZ-43/claude-cleanup\r\n核心定位：仅清理 Claude 封号残余数据 · 绝不改动 Windows 系统本身";
+                d["BtnBackToWorkspace"] = "返回扫描工作台";
+                d["FooterBoundary"] = "安全边界：仅限白名单 Claude 残余 · 绝不改动 Windows 系统";
+                d["DemoPlanNotice"] = "当前处于 --demo-audit 演示模式，仅展示只读模拟清单，不会写入真实 CLEANUP-PLAN.md 或执行删除。";
                 d["ColSelect"] = "选择";
                 d["ColCategory"] = "类别";
                 d["ColPath"] = "残余项目 / 路径";
@@ -96,12 +139,13 @@ namespace ClaudeResidualIdCleaner
             else
             {
                 d["AppTitle"] = "Claude Residual ID Cleaner (Claude 账号残余 ID 清理工具) v1.0";
-                d["HeaderTitle"] = "Claude Residual ID Cleaner (Claude 账号残余 ID 清理工具)";
-                d["VersionBadge"] = "v1.0 · Native WPF Desktop App";
+                d["BrandName"] = "claude-cleanup";
+                d["HeaderTitle"] = "Claude Residual ID Cleaner";
+                d["VersionBadge"] = "v1.0 · Native WPF Studio";
                 d["SafetyPill"] = "Cleans Claude Banned-Account Residuals Only · Never Alters Windows OS";
                 d["Positioning"] = "Purpose-built to clean residual account/device IDs, auth tokens, and session caches left behind after a Claude ban — strictly without altering Windows OS itself.";
-                d["LangButton"] = "中文 / English (Active: English)";
-                d["AboutButton"] = "About & Safety";
+                d["LangButton"] = "简体中文 / English";
+                d["AboutButton"] = "Safety & About";
                 d["AboutTitle"] = "About & Safety Boundaries";
                 d["AboutBody"] =
                     "claude-cleanup — Claude Residual ID Cleaner\r\n\r\n" +
@@ -112,12 +156,32 @@ namespace ClaudeResidualIdCleaner
                     "2. Cleanup delegates exclusively to ClaudeCleanup.ps1 allowlists and Win32 handle-bound deletion;\r\n" +
                     "3. Never alters Windows OS files, WSL, browser profiles, OS hardware IDs, or remote server state;\r\n" +
                     "4. Credential Manager and env vars report counts/names only — secret values are never read.";
+                d["SidebarSectionTitle"] = "WORKSPACE";
+                d["NavScan"] = "1. Residual Scan";
+                d["NavPlan"] = "2. Plan Preview";
+                d["NavClean"] = "3. Safe Cleanup";
+                d["NavVerify"] = "4. Verify & Reports";
+                d["NavAbout"] = "5. Safety & About";
+                d["SidebarGuardTitle"] = "Engine Guardrail";
+                d["SidebarGuardBody"] = "Delegates to ClaudeCleanup.ps1\r\nRead-only default · Handle-bound · Never Alters Windows OS";
+                d["PolicyPillPrefix"] = "Policy: ";
+                d["PolicyAccountShort"] = "AccountData";
+                d["PolicyFullShort"] = "FullRemoval";
+                d["MetricScannedTitle"] = "Scanned Targets";
+                d["MetricScannedSub"] = "Allowlisted engine probes";
+                d["MetricFoundTitle"] = "Found Residuals";
+                d["MetricFoundSub"] = "Active & read-only audit items";
+                d["MetricSizeTitle"] = "Estimated Reclaimable";
+                d["MetricSizeSub"] = "Computed from tree snapshot";
+                d["MetricSafetyTitle"] = "OS Safety Status";
+                d["MetricSafetyValue"] = "Protected";
+                d["MetricSafetySub"] = "Never Alters Windows OS";
                 d["ScopeHeader"] = "Scan & Cleanup Target Scope (Guarded by ClaudeCleanup.ps1 Allowlist)";
-                d["ChkCli"] = "1. Claude Code CLI Configs & Account/Device IDs (~/.claude, .claude.json, npm/global state)";
+                d["ChkCli"] = "1. Claude Code CLI Configs & Account/Device IDs (~/.claude, .claude.json, npm/global)";
                 d["ChkDesktop"] = "2. Claude Desktop Session & Local Storage (%APPDATA%\\Claude, %LOCALAPPDATA%\\Claude)";
-                d["ChkVsCode"] = "3. VS Code / Cursor Extension Residual Caches (globalStorage / workspaceStorage Claude entries)";
-                d["ChkCred"] = "4. Windows Credential Manager Claude Logins (Credential Manager Claude targets · Read-only count)";
-                d["ChkEnv"] = "5. Claude User Environment Variables (ANTHROPIC_* / CLAUDE_* user env vars · Names only)";
+                d["ChkVsCode"] = "3. VS Code / Cursor Extensions & Browser Hosts (extensions / NativeMessagingHosts)";
+                d["ChkCred"] = "4. Windows Credential Manager Claude Logins (Credential Manager · Read-only count)";
+                d["ChkEnv"] = "5. Claude User Environment Variables (ANTHROPIC_* / CLAUDE_* · Names only)";
                 d["PolicyHeader"] = "Cleanup Policy";
                 d["PolicyAccount"] = "AccountData (Clears auth tokens, device metadata caches & logs; keeps .claude files)";
                 d["PolicyFull"] = "FullRemoval (Removes user-level Claude apps, extensions, configs & host keys)";
@@ -126,7 +190,29 @@ namespace ClaudeResidualIdCleaner
                 d["BtnClean"] = "3. Clean Selected";
                 d["BtnVerify"] = "4. Verify Clean";
                 d["BtnOpenFolder"] = "Open Reports Folder";
-                d["BtnExportSummary"] = "Export Summary (AUDIT.md)";
+                d["BtnExportSummary"] = "Export AUDIT.md";
+                d["BtnToggleLogs"] = "Logs";
+                d["LogDrawerTitle"] = "Live Execution Log · ClaudeCleanup.ps1 Out-Of-Process Output";
+                d["GridEmptyHint"] = "No scan run yet — click '1. Scan Residuals' to perform a read-only audit.";
+                d["DemoBanner"] = "Demo Audit Mode (--demo-audit): Displaying sanitized mock post-ban residuals; zero host disk reads or mutations.";
+                d["NavBannerScan"] = "Step 1 · Residual Scan: Choose target categories and click '1. Scan Residuals' for a 100% read-only audit.";
+                d["NavBannerPlan"] = "Step 2 · Plan Preview: Generate a deterministic SHA-256 bound plan (CLEANUP-PLAN.md).";
+                d["NavBannerClean"] = "Step 3 · Safe Cleanup: Clean stays locked until scan + Ready plan exist; mandates -WhatIf preview and confirmation.";
+                d["NavBannerVerify"] = "Step 4 · Verify & Reports: Inspect post-cleanup state, VERIFICATION.md ledger, or export sanitized AUDIT.md.";
+                d["NavBannerAbout"] = "Step 5 · Safety & About: Review single-backend architecture isolation, Win32 handle-bound safeguards, and metadata.";
+                d["SafetyViewTitle"] = "Safety Architecture & Boundary Guarantees";
+                d["SafetyViewSubtitle"] = "This desktop shell is strictly a presentation and orchestration layer; every probe and cleanup action delegates to ClaudeCleanup.ps1.";
+                d["SafetyCard1Title"] = "1. Read-Only Default & Two-Stage Safety Lock";
+                d["SafetyCard1Body"] = "Zero changes on startup. Clean Selected remains disabled until a scan completes and Ready items exist in a SHA-256 plan, then requires -WhatIf preview and explicit path confirmation.";
+                d["SafetyCard2Title"] = "2. Single Backend & Win32 Handle-Bound Deletion";
+                d["SafetyCard2Body"] = "No file or registry deletion code exists in the GUI. All operations invoke ClaudeCleanup.ps1 out-of-process with reparse-point rejection, owner SID checks, and HKCU allowlisting.";
+                d["SafetyCard3Title"] = "3. Privacy Boundary & Secret-Free Audits";
+                d["SafetyCard3Body"] = "Credential Manager reports Claude* target counts only and environment variables report names only (ANTHROPIC_* / CLAUDE_*); secret values and unrelated profiles are never read.";
+                d["SafetyCard4Title"] = "4. Version & Repository Metadata";
+                d["SafetyCard4Body"] = "Product: claude-cleanup (Claude Residual ID Cleaner) v1.0.0.0\r\nRuntime: .NET Framework 4.x Native WPF Zero-Console App (IMAGE_SUBSYSTEM_WINDOWS_GUI)\r\nRepository: https://github.com/YUCZ-43/claude-cleanup\r\nPositioning: Cleans Claude Banned-Account Residuals Only · Never Alters Windows OS";
+                d["BtnBackToWorkspace"] = "Back to Scan Workspace";
+                d["FooterBoundary"] = "Boundary: Allowlisted Claude residuals only · Never Alters Windows OS";
+                d["DemoPlanNotice"] = "Demo Audit Mode (--demo-audit) is active: mock inventory is read-only and will not write CLEANUP-PLAN.md or mutate disk.";
                 d["ColSelect"] = "Select";
                 d["ColCategory"] = "Category";
                 d["ColPath"] = "Residual Item / Path";

@@ -7,6 +7,8 @@ $skillRoot = Join-Path $repoRoot 'skills\claude-cleanup'
 $skillMdPath = Join-Path $skillRoot 'SKILL.md'
 $permRefPath = Join-Path $skillRoot 'references\permissions-and-risks.md'
 $installRefPath = Join-Path $skillRoot 'references\agent-installation.md'
+$usageGuideZhPath = Join-Path $repoRoot 'docs\Skills-Usage-Guide.md'
+$usageGuideEnPath = Join-Path $repoRoot 'docs\Skills-Usage-Guide.en.md'
 
 $sandboxRoot = Join-Path $PSScriptRoot 'sandbox'
 $sandboxRootExisted = Test-Path -LiteralPath $sandboxRoot
@@ -180,8 +182,33 @@ try {
     Assert-True (($installText -match 'Uninstallation') -and ($installText -match 'does \*\*not\*\* remove Claude') -and ($installText -match 'Live CLI Discovery Check')) 'agent-installation.md documents skill-only uninstallation and manual live CLI discovery check'
     Assert-True (($permText -match 'SetFileInformationByHandle') -and ($permText -match 'NtDeleteKey') -and ($permText -match 'SchemaVersion = 3') -and ($permText -match 'Unknown')) 'permissions-and-risks.md accurately summarizes Win32, registry, manifest, and 3-state safeguards'
 
+    # 4b. Bilingual Skills Usage Guides (docs/Skills-Usage-Guide.md & docs/Skills-Usage-Guide.en.md)
+    Assert-True ((Test-Path -LiteralPath $usageGuideZhPath -PathType Leaf) -and (Test-Path -LiteralPath $usageGuideEnPath -PathType Leaf)) 'docs/Skills-Usage-Guide.md and docs/Skills-Usage-Guide.en.md exist'
+    $usageGuideZhText = $utf8Strict.GetString([IO.File]::ReadAllBytes($usageGuideZhPath))
+    $usageGuideEnText = $utf8Strict.GetString([IO.File]::ReadAllBytes($usageGuideEnPath))
+    $emojiRegex = '[\u2600-\u27BF]|[\uD800-\uDBFF][\uDC00-\uDFFF]'
+    Assert-True (
+        ($usageGuideZhText -match 'Antigravity') -and
+        ($usageGuideZhText -match 'Codex CLI') -and
+        ($usageGuideZhText -match 'Claude Code') -and
+        ($usageGuideZhText -match 'Gemini CLI') -and
+        ($usageGuideZhText -match 'Skills-Usage-Guide\.en\.md') -and
+        ($usageGuideEnText -match 'Antigravity') -and
+        ($usageGuideEnText -match 'Codex CLI') -and
+        ($usageGuideEnText -match 'Claude Code') -and
+        ($usageGuideEnText -match 'Gemini CLI') -and
+        ($usageGuideEnText -match 'Skills-Usage-Guide\.md')
+    ) 'Bilingual Skills-Usage-Guide docs cover Antigravity, Codex CLI, Claude Code, Gemini CLI, and bidirectional links'
+
+    Assert-True (
+        ($usageGuideZhText -notmatch $emojiRegex) -and
+        ($usageGuideEnText -notmatch $emojiRegex) -and
+        (-not $usageGuideZhText.Contains([char]0xFFFD)) -and
+        (-not $usageGuideEnText.Contains([char]0xFFFD))
+    ) 'Bilingual Skills-Usage-Guide docs contain zero emojis and zero UTF-8 replacement characters'
+
     # 5. Privacy & placeholder checks (zero personal user paths or SIDs)
-    $allCheckedDocs = @($skillText, $permText, $installText, ($utf8Strict.GetString([IO.File]::ReadAllBytes($PSCommandPath))))
+    $allCheckedDocs = @($skillText, $permText, $installText, $usageGuideZhText, $usageGuideEnText, ($utf8Strict.GetString([IO.File]::ReadAllBytes($PSCommandPath))))
     $privacyLeak = $false
     foreach ($txt in $allCheckedDocs) {
         if ($txt -match 'C:\\Users\\(?!<USERNAME>)[A-Za-z0-9._-]+' -or $txt -match 'S-1-5-21-\d+') {

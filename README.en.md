@@ -1,8 +1,10 @@
-[简体中文](README.md) | English
+[简体中文](README.md) | English | [Cross-Agent Skill Guide](docs/Skills-Usage-Guide.en.md) | [技能实战指南 (中文)](docs/Skills-Usage-Guide.md)
 
 # claude-cleanup (`Claude Residual ID Cleaner`)
 
 **claude-cleanup** (desktop application: **Claude Residual ID Cleaner / Claude 账号残余 ID 清理工具**) is a non-destructive Windows standalone desktop application (`Claude-Residual-ID-Cleaner.exe`) and native PowerShell toolkit designed specifically to scan and safely clean residual account/device IDs, auth tokens, and session caches left behind after a Claude account ban across Claude Code CLI, Claude Desktop, VS Code/Cursor extensions, Windows Credential Manager, and environment variables — **strictly without altering or harming Windows OS itself**.
+
+![Claude Residual ID Cleaner Desktop Studio (zh-CN)](docs/images/ui-main-zh.png)
 
 ---
 
@@ -56,15 +58,37 @@
 
 ### 3.2 Option 1: Standalone Windows Desktop App (`Claude-Residual-ID-Cleaner.exe`, Zero Console Window)
 
+#### Download & Double-Click Launch (GitHub Releases / GitHub Actions Artifacts)
+
+End users do not need to install compilers or manually run build scripts:
+
+1. Open the repository's **GitHub Releases** page or the **Artifacts** section at the bottom of the latest **GitHub Actions** CI run:
+   - **Full Release Bundle (Recommended)**: Download `claude-cleanup-release-bundle` (contains `claude-cleanup-<Version>.zip` and `SHA256SUMS.txt`). `claude-cleanup-<Version>.zip` bundles `Claude-Residual-ID-Cleaner.exe` directly at the archive root alongside `ClaudeCleanup.ps1`.
+   - **Standalone Executable Artifact**: Alternatively download `claude-residual-id-cleaner-exe` (`Claude-Residual-ID-Cleaner.exe`) and place it in a toolkit folder (or `dist\`) alongside `ClaudeCleanup.ps1`.
+2. Verify the archive SHA-256 digest (optional, recommended):
+   ```powershell
+   Get-FileHash .\claude-cleanup-0.1.0.zip -Algorithm SHA256
+   ```
+3. Extract `claude-cleanup-<Version>.zip` and **double-click `Claude-Residual-ID-Cleaner.exe`** to open the native WPF desktop studio with zero console window.
+
+#### Build & Package Offline From Source
+
 Source files under [src/Gui/](src/Gui/) compile offline with Windows' built-in `.NET Framework 4.x` C# compiler (`csc.exe`) into a single native WPF GUI executable (`IMAGE_SUBSYSTEM_WINDOWS_GUI`):
 
 ```powershell
-# 1. Build standalone executable offline
+# 1. Build standalone executable offline -> .\dist\Claude-Residual-ID-Cleaner.exe
 .\scripts\Build-DesktopApp.ps1
 
 # 2. Launch the desktop app
 .\dist\Claude-Residual-ID-Cleaner.exe
+
+# 3. (Optional) Create release ZIP bundling Claude-Residual-ID-Cleaner.exe at archive root + SHA256SUMS.txt
+.\scripts\New-ReleasePackage.ps1
 ```
+
+#### Desktop Studio Workflow & Preview
+
+![Claude Residual ID Cleaner Demo Scan Results (zh-CN)](docs/images/ui-scan-results-zh.png)
 
 Guided four-step UI workflow:
 1. **Configure Scopes & Policy**: Check any of the 5 residual categories and choose `AccountData` or `FullRemoval`.
@@ -72,7 +96,7 @@ Guided four-step UI workflow:
 3. **`2. Preview Plan`**: Generates `CLEANUP-PLAN.md` with deterministic SHA-256 digest; `3. Clean Selected` remains disabled until valid `Ready` items exist.
 4. **`3. Clean Selected` & `4. Verify Clean`**: Displays an explicit confirmation dialog listing exact paths, policy, and manifest SHA-256 before running `ClaudeCleanup.ps1 -Apply`, followed by ledger verification (`VERIFICATION.md`), folder shortcut, and sanitized `AUDIT.md` export.
 
-> Prefer zero compilation? Double-click [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) to run the companion native WinForms desktop wrapper ([scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)).
+> Prefer zero compilation? Double-click [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) to run the companion native WinForms desktop wrapper ([scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)). You can also regenerate these non-destructive `--demo-audit --capture-png` screenshots locally via [scripts/Capture-UiScreenshots.ps1](scripts/Capture-UiScreenshots.ps1).
 
 ### 3.3 Option 2: Bilingual Console Menu Launcher
 
@@ -106,7 +130,7 @@ Full flag and JSON contract documentation is available in [CLI Reference](docs/C
   powershell.exe -NoProfile -File .\scripts\Update-ClaudeCleanup.ps1
   powershell.exe -NoProfile -File .\scripts\Uninstall-ClaudeCleanup.ps1
   ```
-- **Cross-Agent Skill ([skills/claude-cleanup/](skills/claude-cleanup/))**: Supports Codex CLI (`~/.codex/skills/` or `~/.agents/skills/`), Antigravity CLI (`~/.gemini/config/skills/`), Gemini CLI (`~/.gemini/skills/`), and Claude Code (`~/.claude/skills/`). See [SKILL.md](skills/claude-cleanup/SKILL.md), [agent-installation.md](skills/claude-cleanup/references/agent-installation.md), and [Agent Skill Guide](docs/Agent-Skill-Guide.md).
+- **Cross-Agent Skill ([skills/claude-cleanup/](skills/claude-cleanup/))**: Supports Antigravity (`~/.gemini/config/skills/`), Codex CLI (`~/.codex/skills/` or `~/.agents/skills/`), Gemini CLI (`~/.gemini/skills/`), and Claude Code (`~/.claude/skills/`). **For full installation steps, activation behavior, and copy-pasteable prompts, see the [Cross-Agent Skill Usage Guide](docs/Skills-Usage-Guide.en.md)** ([简体中文技能实战指南](docs/Skills-Usage-Guide.md)), plus [SKILL.md](skills/claude-cleanup/SKILL.md), [agent-installation.md](skills/claude-cleanup/references/agent-installation.md), and [Agent Skill Guide](docs/Agent-Skill-Guide.md).
 
 ---
 
@@ -115,6 +139,8 @@ Full flag and JSON contract documentation is available in [CLI Reference](docs/C
 - **Standalone WPF Desktop `.exe` & WinForms GUI**: Automatically detects Chinese Windows locales (`zh-CN` default) and provides a one-click **`中文 / English`** toggle in the top header that immediately translates labels, scope descriptions, column headers, safety badges, status messages, and confirmation dialogs without restarting.
 - **CLI & Console Launcher**: Supports `-Language Auto|zh-CN|en-US`; configures UTF-8 console output cleanly on both PowerShell 5.1 and 7+.
 - **Localized Reports with Invariant JSON Keys**: `AUDIT.md`, `CLEANUP-PLAN.md`, and `VERIFICATION.md` adapt headings and explanations cleanly while `-OutputFormat Json` (`SchemaVersion = 3`) preserves invariant English schema keys across every locale.
+
+![Claude Residual ID Cleaner Desktop Studio (en-US)](docs/images/ui-main-en.png)
 
 ---
 
