@@ -7,17 +7,31 @@ if (Test-Path -LiteralPath $sandbox) { throw "Test sandbox already exists: $sand
 New-Item -ItemType Directory -Path $sandbox | Out-Null
 $passed = 0
 $skipped = 0
+$notExecuted = 0
+$failedList = New-Object 'System.Collections.Generic.List[string]'
 
 function Assert-True([bool]$Condition, [string]$Name) {
-    if (-not $Condition) { throw "FAIL: $Name" }
+    if (-not $Condition) {
+        $script:failedList.Add($Name)
+        throw "FAIL: $Name"
+    }
     $script:passed++
     Write-Output "PASS: $Name"
 }
+
 function Assert-Throws([scriptblock]$Action, [string]$Name) {
     $threw = $false
     try { & $Action | Out-Null } catch { $threw = $true }
     Assert-True $threw $Name
 }
+
+function Unlock-Safely($stream) {
+    if ($null -ne $stream) {
+        try { $stream.Dispose() } catch {}
+    }
+}
+
+$openStreams = New-Object 'System.Collections.Generic.List[System.IO.Stream]'
 
 try {
     $allowed = Join-Path $sandbox 'allowed'
@@ -25,44 +39,156 @@ try {
     $file = Join-Path $allowed 'sample.txt'
     Set-Content -LiteralPath $file -Value 'sample'
 
+    # 1. Path & boundary safety checks
     Assert-True ((Test-SafeTarget -Path $file -AllowedRoots @($allowed)).Allowed) 'exact in-scope file'
     Assert-Throws { Assert-AuthorizedPath -Path (Join-Path $sandbox 'outside.txt') -AllowedRoots @($allowed) } 'out-of-scope path rejected'
     Assert-Throws { Assert-AuthorizedPath -Path ([IO.Path]::GetPathRoot($sandbox)) -AllowedRoots @($allowed) } 'drive root rejected'
     Assert-Throws { Assert-AuthorizedPath -Path $sandbox -AllowedRoots @($allowed) } 'broad parent rejected'
     Assert-Throws { Assert-AuthorizedPath -Path (Join-Path $allowed '..\outside.txt') -AllowedRoots @($allowed) } 'relative traversal rejected'
+    Assert-Throws { Assert-AuthorizedPath -Path ($file + ':ads') -AllowedRoots @($allowed) } 'alternate data stream path rejected'
+    Assert-Throws { Assert-AuthorizedPath -Path ($file + ' ') -AllowedRoots @($allowed) } 'trailing space segment rejected'
+    Assert-Throws { Assert-AuthorizedPath -Path ($file + '.') -AllowedRoots @($allowed) } 'trailing dot segment rejected'
     $windowsTarget = Join-Path $env:WINDIR 'Temp\claude-test.txt'
     Assert-Throws { Assert-AuthorizedPath -Path $windowsTarget -AllowedRoots @($windowsTarget) } 'Windows path rejected'
     $programTarget = Join-Path $env:ProgramFiles 'Claude\test.txt'
     Assert-Throws { Assert-AuthorizedPath -Path $programTarget -AllowedRoots @($programTarget) } 'Program Files path rejected'
     $codexTarget = Join-Path $env:USERPROFILE '.codex\test.txt'
     Assert-Throws { Assert-AuthorizedPath -Path $codexTarget -AllowedRoots @($codexTarget) } 'Codex path rejected'
+    $geminiTarget = Join-Path $env:USERPROFILE '.gemini\test.txt'
+    Assert-Throws { Assert-AuthorizedPath -Path $geminiTarget -AllowedRoots @($geminiTarget) } 'Gemini path rejected'
+    Assert-Throws { Assert-AuthorizedPath -Path $env:USERPROFILE -AllowedRoots @($env:USERPROFILE) } 'USERPROFILE exact root rejected'
+    Assert-Throws { Assert-AuthorizedPath -Path $env:APPDATA -AllowedRoots @($env:APPDATA) } 'APPDATA exact root rejected'
     Assert-Throws { Assert-AuthorizedPath -Path $scriptPath -AllowedRoots @($scriptPath) } 'project source path rejected'
+
+    # 2. Code-level safety invariants (no Remove-Item, no RegDeleteKeyW, no CheckOwner $false)
+    $fnDeleteTree = (Get-Command Invoke-HandleTreeDeletion).Definition
+    $fnSafeRemoval = (Get-Command Invoke-SafeFileRemoval).Definition
+    $fnSnapshot = (Get-Command Get-SafeTreeSnapshot).Definition
+    $scriptText = [IO.File]::ReadAllText($scriptPath)
+    Assert-True (($fnDeleteTree -notmatch 'Remove-Item') -and ($fnSafeRemoval -notmatch 'Remove-Item')) 'filesystem deletion has no Remove-Item fallback'
+    Assert-True (($fnDeleteTree -notmatch '-CheckOwner\s+\$false') -and ($fnSnapshot -match '-RequireOwnerMatch')) 'tree inspection and deletion enforce owner matching on children'
+    Assert-True (($scriptText -match 'NtDeleteKey\(') -and ($scriptText -notmatch 'RegDeleteKeyW\(')) 'registry deletion uses object-bound NtDeleteKey without path-based RegDeleteKeyW'
+
+    # 3. Overlap guard
     Assert-True ([bool](Get-Command Assert-NoOverlappingTargets -ErrorAction SilentlyContinue)) 'overlap guard exists'
     $overlapping = @([pscustomobject]@{ Kind = 'Filesystem'; Path = $allowed },
         [pscustomobject]@{ Kind = 'Filesystem'; Path = $file })
     Assert-Throws { Assert-NoOverlappingTargets -Records $overlapping } 'overlapping deletion targets rejected'
 
+    # 4. Finding 1: Explicit 3-state presence detection (Present / Absent / Unknown)
+    Assert-True ((Get-TargetPresenceState -Path $file).State -eq 'Present') 'existing file reports Present'
+    Assert-True ((Get-TargetPresenceState -Path (Join-Path $allowed 'missing-3state.txt')).State -eq 'Absent') 'missing file reports Absent'
+    Assert-True ((Get-TargetPresenceState -Path '\\?\C:\invalid').State -eq 'Unknown') 'unsafe/inaccessible path reports Unknown rather than Absent'
+    $origAppxFn = (Get-Item Function:\Get-ClaudeAppxPackage).ScriptBlock
+    try {
+        Set-Item Function:\Get-ClaudeAppxPackage -Value { throw [System.UnauthorizedAccessException]::new('Simulated Appx access denied') }
+        $appxPres = Get-RecordPresenceState -Record ([pscustomobject]@{ Kind = 'AppxPackage'; Path = 'Claude_1.0.0.0_x64__pzs8sxrjxfjjc' })
+        Assert-True ($appxPres.State -eq 'Unknown' -and -not [string]::IsNullOrEmpty($appxPres.Error)) 'access error in record presence probe reports Unknown rather than Absent'
+    } finally {
+        Set-Item Function:\Get-ClaudeAppxPackage -Value $origAppxFn
+    }
+
+    # Verify Unknown post-deletion state never produces VerifiedAbsent=true
+    $unkFile = Join-Path $allowed 'unknown-post.txt'
+    Set-Content -LiteralPath $unkFile -Value 'u'
+    $origPresenceFn = (Get-Item Function:\Get-TargetPresenceState).ScriptBlock
+    try {
+        Set-Item Function:\Get-TargetPresenceState -Value {
+            param([Parameter(Mandatory = $true)][string]$Path)
+            if ($Path -like '*unknown-post.txt') {
+                return [pscustomobject]@{ State = 'Unknown'; Error = 'Simulated access denied on presence check' }
+            }
+            return (& $script:origPresenceFnForTest $Path)
+        }
+        $script:origPresenceFnForTest = $origPresenceFn
+        $unkRes = Invoke-SafeFileRemoval -Path $unkFile -AllowedRoots @($allowed) -ReturnFailureResult -Confirm:$false
+        Assert-True ($unkRes.Status -eq 'Failed' -and $unkRes.PresenceState -eq 'Unknown' -and (-not $unkRes.VerifiedAbsent) -and ($null -eq $unkRes.RemainingExists)) 'Unknown presence never becomes VerifiedAbsent'
+    } finally {
+        Set-Item Function:\Get-TargetPresenceState -Value $origPresenceFn
+    }
+    Invoke-SafeFileRemoval -Path $unkFile -AllowedRoots @($allowed) -Confirm:$false | Out-Null
+
+    # 5. Junction, dangling junction, parent-path substitution, and expanded symlink checks
     $junction = Join-Path $allowed 'junction'
     $outside = Join-Path $sandbox 'outside'
     New-Item -ItemType Directory -Path $outside | Out-Null
-    New-Item -ItemType Junction -Path $junction -Target $outside | Out-Null
-    Assert-Throws { Assert-TreeWithoutLinks -Path $allowed } 'nested junction rejected'
-    Assert-Throws { Assert-AuthorizedPath -Path (Join-Path $junction 'secret.txt') -AllowedRoots @($allowed) } 'junction ancestor rejected'
-    Remove-Item -LiteralPath $junction -Force
-
-    $symlink = Join-Path $allowed 'symlink'
+    $outsideSentinel = Join-Path $outside 'sentinel.txt'
+    Set-Content -LiteralPath $outsideSentinel -Value 'keep-me'
+    $junctionCreated = $false
     try {
-        New-Item -ItemType SymbolicLink -Path $symlink -Target $outside | Out-Null
-        Assert-Throws { Assert-TreeWithoutLinks -Path $allowed } 'nested symlink rejected'
-        Remove-Item -LiteralPath $symlink -Force
-    } catch [System.UnauthorizedAccessException] {
-        $skipped++
-        Write-Output 'SKIP: symlink creation needs Windows privilege'
+        New-Item -ItemType Junction -Path $junction -Target $outside -ErrorAction Stop | Out-Null
+        $junctionCreated = $true
+    } catch {
+        $skipped += 8
+        Write-Output "SKIP: junction tests skipped because environment/sandbox blocked reparse point creation ($($_.Exception.Message))"
+    }
+    if ($junctionCreated) {
+        Assert-Throws { Assert-TreeWithoutLinks -Path $allowed } 'nested junction rejected'
+        Assert-Throws { Assert-AuthorizedPath -Path (Join-Path $junction 'secret.txt') -AllowedRoots @($allowed) } 'junction ancestor rejected'
+        Assert-Throws { Invoke-SafeFileRemoval -Path $allowed -AllowedRoots @($allowed) -Confirm:$false } 'junction blocks parent removal'
+        Assert-True (Test-Path -LiteralPath $outsideSentinel) 'outside sentinel untouched after junction rejection'
+        [IO.Directory]::Delete($junction)
+
+        # Broken/dangling junction
+        $danglingTarget = Join-Path $sandbox 'gone-target'
+        New-Item -ItemType Directory -Path $danglingTarget | Out-Null
+        $danglingJunction = Join-Path $allowed 'dangling-junction'
+        New-Item -ItemType Junction -Path $danglingJunction -Target $danglingTarget | Out-Null
+        [IO.Directory]::Delete($danglingTarget)
+        Assert-Throws { Assert-NoLinkAncestors -Path (Join-Path $danglingJunction 'child.txt') } 'dangling junction ancestor rejected'
+        Assert-Throws { Assert-TreeWithoutLinks -Path $allowed } 'dangling nested junction rejected'
+        [IO.Directory]::Delete($danglingJunction)
+
+        # Parent-path substitution simulation
+        $subParent = Join-Path $sandbox 'parent-swap'
+        New-Item -ItemType Junction -Path $subParent -Target $outside | Out-Null
+        Assert-Throws { Assert-AuthorizedPath -Path (Join-Path $subParent 'sentinel.txt') -AllowedRoots @($subParent) } 'parent-path substitution rejected'
+        Assert-True (Test-Path -LiteralPath $outsideSentinel) 'parent-path substitution leaves outside target intact'
+        [IO.Directory]::Delete($subParent)
     }
 
-    Assert-True ((Invoke-SafeFileRemoval -Path (Join-Path $allowed 'missing.txt') -AllowedRoots @($allowed)).Status -eq 'AlreadyAbsent') 'missing target idempotent'
+    # Expanded symlink tests (directory symlink, file symlink, dangling symlink, symlink ancestor)
+    $dirSymlink = Join-Path $allowed 'dir-symlink'
+    $fileSymlink = Join-Path $allowed 'file-symlink.txt'
+    $danglingSymTarget = Join-Path $sandbox 'sym-gone.txt'
+    $danglingSymlink = Join-Path $allowed 'dangling-symlink.txt'
+    $symlinkSupported = $false
+    try {
+        New-Item -ItemType SymbolicLink -Path $dirSymlink -Target $outside -ErrorAction Stop | Out-Null
+        $symlinkSupported = $true
+    } catch {
+        $skipped += 4
+        Write-Output "SKIP: directory symlink test skipped (privilege required: $($_.Exception.Message))"
+        Write-Output 'SKIP: file symlink test skipped (requires symlink creation privilege)'
+        Write-Output 'SKIP: dangling symlink test skipped (requires symlink creation privilege)'
+        Write-Output 'SKIP: symlink ancestor test skipped (requires symlink creation privilege)'
+    }
+    if ($symlinkSupported) {
+        Assert-Throws { Assert-TreeWithoutLinks -Path $allowed } 'directory symlink rejected'
+        Assert-Throws { Assert-AuthorizedPath -Path (Join-Path $dirSymlink 'sentinel.txt') -AllowedRoots @($allowed) } 'directory symlink ancestor rejected'
+        [IO.Directory]::Delete($dirSymlink)
+
+        New-Item -ItemType SymbolicLink -Path $fileSymlink -Target $outsideSentinel -ErrorAction Stop | Out-Null
+        Assert-Throws { Invoke-SafeFileRemoval -Path $fileSymlink -AllowedRoots @($allowed) -Confirm:$false } 'file symlink rejected'
+        [IO.File]::Delete($fileSymlink)
+
+        Set-Content -LiteralPath $danglingSymTarget -Value 'temp'
+        New-Item -ItemType SymbolicLink -Path $danglingSymlink -Target $danglingSymTarget -ErrorAction Stop | Out-Null
+        [IO.File]::Delete($danglingSymTarget)
+        Assert-Throws { Assert-NoLinkAncestors -Path $danglingSymlink } 'dangling file symlink rejected'
+        [IO.File]::Delete($danglingSymlink)
+    }
+
+    # 6. Missing target, WhatIf, ReadOnly file, locked file, empty dir, and idempotency
+    Assert-True ((Invoke-SafeFileRemoval -Path (Join-Path $allowed 'missing.txt') -AllowedRoots @($allowed) -Confirm:$false).Status -eq 'AlreadyAbsent') 'missing target idempotent'
     Invoke-SafeFileRemoval -Path $file -AllowedRoots @($allowed) -WhatIf | Out-Null
     Assert-True (Test-Path -LiteralPath $file) 'WhatIf preserves file'
+
+    $roFile = Join-Path $allowed 'readonly.txt'
+    Set-Content -LiteralPath $roFile -Value 'readonly-data'
+    [IO.File]::SetAttributes($roFile, [IO.FileAttributes]::ReadOnly)
+    Assert-True ((Invoke-SafeFileRemoval -Path $roFile -AllowedRoots @($allowed) -Confirm:$false).Status -eq 'Removed') 'ReadOnly file removed via handle'
+    Assert-True (-not (Test-Path -LiteralPath $roFile)) 'ReadOnly file absent after removal'
 
     $manifest = Join-Path $sandbox 'manifest.md'
     Set-Content -LiteralPath $manifest -Value 'test manifest'
@@ -77,25 +203,263 @@ try {
         Assert-Throws { Assert-ManifestAuthorization -ManifestPath $manifest -ApprovedHash ('0' * 64) } 'WhatIf still rejects wrong manifest hash'
     } finally { $WhatIfPreference = $priorWhatIf }
 
-    $candidate = Get-Candidate -Id 'stale-sandbox-file' -Path $file -Category 'Test' -Policy 'AccountData'
-    $record = Get-ArtifactRecord $candidate
-    Add-Content -LiteralPath $file -Value 'changed after planning'
-    Assert-Throws { Assert-CurrentRecord -Record $record -Candidates @($candidate) } 'changed target invalidates plan'
+    # 7. Stale target detection: nested same-size edit & FileIndex swap with identical timestamps
+    $nestedDir = Join-Path $allowed 'nested-tree'
+    $nestedSub = Join-Path $nestedDir 'sub'
+    New-Item -ItemType Directory -Path $nestedSub -Force | Out-Null
+    $nestedFile = Join-Path $nestedSub 'payload.dat'
+    [IO.File]::WriteAllText($nestedFile, 'AAAAA')
+    $dirCand = Get-Candidate -Id 'sandbox-nested-dir' -Path $nestedDir -Category 'Test' -Policy 'AccountData'
+    $dirRec = Get-ArtifactRecord $dirCand
+    [IO.File]::WriteAllText($nestedFile, 'BBBBB')
+    $bumped = (Get-Item -LiteralPath $nestedFile).LastWriteTimeUtc.AddSeconds(5)
+    [IO.File]::SetLastWriteTimeUtc($nestedFile, $bumped)
+    Assert-Throws { Assert-CurrentRecord -Record $dirRec -Candidates @($dirCand) } 'same-size nested modification detected via MaxLastWriteUtcTicks'
 
-    $stream = [IO.File]::Open($file, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    $swapFile = Join-Path $allowed 'swap.txt'
+    [IO.File]::WriteAllText($swapFile, '12345')
+    $origCreation = [IO.File]::GetCreationTimeUtc($swapFile)
+    $origWrite = [IO.File]::GetLastWriteTimeUtc($swapFile)
+    $swapCand = Get-Candidate -Id 'sandbox-swap-file' -Path $swapFile -Category 'Test' -Policy 'AccountData'
+    $swapRec = Get-ArtifactRecord $swapCand
+    [IO.File]::Delete($swapFile)
+    [IO.File]::WriteAllText($swapFile, '67890')
+    [IO.File]::SetCreationTimeUtc($swapFile, $origCreation)
+    [IO.File]::SetLastWriteTimeUtc($swapFile, $origWrite)
+    Assert-Throws { Assert-CurrentRecord -Record $swapRec -Candidates @($swapCand) } 'replaced file with identical timestamps and size detected via FileIndex'
+
+    # 8. Locked file & partial directory deletion detection
+    $lockStream = [IO.File]::Open($file, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    $openStreams.Add($lockStream)
     try {
-        Assert-Throws { Invoke-SafeFileRemoval -Path $file -AllowedRoots @($allowed) } 'locked file reports failure'
-    } finally { $stream.Dispose() }
+        Assert-Throws { Invoke-SafeFileRemoval -Path $file -AllowedRoots @($allowed) -Confirm:$false } 'locked file reports failure'
+    } finally {
+        Unlock-Safely $lockStream
+        $openStreams.Remove($lockStream) | Out-Null
+    }
     Assert-True (Test-Path -LiteralPath $file) 'failed deletion leaves file'
-    Assert-True ((Invoke-SafeFileRemoval -Path $file -AllowedRoots @($allowed)).Status -eq 'Removed') 'approved sandbox file removed'
-    Assert-True ((Invoke-SafeFileRemoval -Path $file -AllowedRoots @($allowed)).Status -eq 'AlreadyAbsent') 'second removal idempotent'
+    Assert-True ((Invoke-SafeFileRemoval -Path $file -AllowedRoots @($allowed) -Confirm:$false).Status -eq 'Removed') 'approved sandbox file removed'
+    Assert-True ((Invoke-SafeFileRemoval -Path $file -AllowedRoots @($allowed) -Confirm:$false).Status -eq 'AlreadyAbsent') 'second removal idempotent'
+
     $empty = Join-Path $allowed 'empty'
     New-Item -ItemType Directory -Path $empty | Out-Null
-    Assert-True ((Invoke-SafeFileRemoval -Path $empty -AllowedRoots @($allowed)).Status -eq 'Removed') 'empty directory removed'
-    Write-Output "RESULT: $passed passed; $skipped skipped"
+    Assert-True ((Invoke-SafeFileRemoval -Path $empty -AllowedRoots @($allowed) -Confirm:$false).Status -eq 'Removed') 'empty directory removed'
+
+    $partialDir = Join-Path $allowed 'partial-dir'
+    New-Item -ItemType Directory -Path $partialDir | Out-Null
+    $pFile1 = Join-Path $partialDir 'a_unlocked.txt'
+    $pFile2 = Join-Path $partialDir 'z_locked.txt'
+    Set-Content -LiteralPath $pFile1 -Value 'a'
+    Set-Content -LiteralPath $pFile2 -Value 'z'
+    $pStream = [IO.File]::Open($pFile2, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    $openStreams.Add($pStream)
+    try {
+        $partialRes = Invoke-SafeFileRemoval -Path $partialDir -AllowedRoots @($partialDir) -ReturnFailureResult -Confirm:$false
+        Assert-True ($partialRes.Status -eq 'Failed' -and $partialRes.PartialRemoval -and $partialRes.ItemsRemoved -ge 1 -and $partialRes.ItemsFailed -ge 1 -and $partialRes.RemainingExists) 'partial directory failure accurately detected'
+    } finally {
+        Unlock-Safely $pStream
+        $openStreams.Remove($pStream) | Out-Null
+    }
+
+    # 9. End-to-end sandbox Plan -> Apply -> Tamper -> Replay -> PartialFailure -> Verify
+    $e2eDir = Join-Path $sandbox 'e2e'
+    New-Item -ItemType Directory -Path $e2eDir | Out-Null
+    $accFile = Join-Path $e2eDir 'account.dat'
+    $fullFile = Join-Path $e2eDir 'full.dat'
+    $reviewFile = Join-Path $e2eDir 'review.dat'
+    Set-Content -LiteralPath $accFile -Value 'acc'
+    Set-Content -LiteralPath $fullFile -Value 'full'
+    Set-Content -LiteralPath $reviewFile -Value 'rev'
+
+    $cands = @(
+        (Get-Candidate -Id 'sb-acc' -Path $accFile -Category 'Test' -Policy 'AccountData' -Decision 'Ready'),
+        (Get-Candidate -Id 'sb-rev' -Path $reviewFile -Category 'Test' -Policy 'AccountData' -Decision 'ReviewOnly'),
+        (Get-Candidate -Id 'sb-full' -Path $fullFile -Category 'Test' -Policy 'FullRemoval' -Decision 'Ready')
+    )
+    $sbPlan = Join-Path $e2eDir 'PLAN.md'
+    $sbVer = Join-Path $e2eDir 'VERIFICATION.md'
+
+    $planInfo = Invoke-CleanupPlan -PlanPath $sbPlan -CandidatesOverride $cands
+    Assert-True ($planInfo.Entries -eq 3 -and $planInfo.Ready -eq 2 -and $planInfo.NonReady -eq 1) 'sandbox plan counts accurate'
+
+    $tamperedPlan = Join-Path $e2eDir 'PLAN-TAMPERED.md'
+    $origPlanText = [IO.File]::ReadAllText($sbPlan)
+    [IO.File]::WriteAllText($tamperedPlan, ($origPlanText + "`n<!-- tampered -->"), (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $planInfo.Sha256 -PlanPath $tamperedPlan -VerificationPath $sbVer -CandidatesOverride $cands -Confirm:$false } 'tampered manifest rejected'
+
+    $dupPlan = Join-Path $e2eDir 'PLAN-DUP.md'
+    $dupText = $origPlanText + "`r`n<!-- MANIFEST-JSON-BEGIN -->`r`n{}`r`n<!-- MANIFEST-JSON-END -->`r`n"
+    [IO.File]::WriteAllText($dupPlan, $dupText, (New-Object System.Text.UTF8Encoding($false)))
+    $dupHash = Get-Sha256 -Path $dupPlan
+    Assert-Throws { Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $dupHash -PlanPath $dupPlan -VerificationPath $sbVer -CandidatesOverride $cands -Confirm:$false } 'duplicate JSON block rejected'
+
+    $v2Plan = Join-Path $e2eDir 'PLAN-V2.md'
+    $v2Text = [regex]::Replace($origPlanText, '"SchemaVersion"\s*:\s*3', '"SchemaVersion": 2')
+    [IO.File]::WriteAllText($v2Plan, $v2Text, (New-Object System.Text.UTF8Encoding($false)))
+    $v2Hash = Get-Sha256 -Path $v2Plan
+    Assert-Throws { Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $v2Hash -PlanPath $v2Plan -VerificationPath $sbVer -CandidatesOverride $cands -Confirm:$false } 'SchemaVersion 2 manifest rejected by Apply'
+    $v2Ver = Invoke-CleanupVerify -PlanPath $v2Plan -VerificationPath $sbVer -CandidatesOverride $cands
+    Assert-True (-not [string]::IsNullOrEmpty($v2Ver.PlanError)) 'Verify reports SchemaVersion 2 warning without crashing'
+
+    $escalatedPlan = Join-Path $e2eDir 'PLAN-ESCALATED.md'
+    $escalatedText = [regex]::Replace($origPlanText, '"Decision"\s*:\s*"ReviewOnly"', '"Decision": "Ready"')
+    [IO.File]::WriteAllText($escalatedPlan, $escalatedText, (New-Object System.Text.UTF8Encoding($false)))
+    $escalatedHash = Get-Sha256 -Path $escalatedPlan
+    Assert-Throws { Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $escalatedHash -PlanPath $escalatedPlan -VerificationPath $sbVer -CandidatesOverride $cands -Confirm:$false } 'ReviewOnly promotion in manifest rejected'
+
+    $previewOut = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $planInfo.Sha256 -PlanPath $sbPlan -VerificationPath $sbVer -CandidatesOverride $cands -WhatIf
+    Assert-True ($previewOut.Outcome -eq 'PreviewOnly' -and (Test-Path -LiteralPath $accFile) -and (-not (Test-Path -LiteralPath $sbVer))) 'WhatIf does not consume authorization or delete target'
+
+    $applyOut = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $planInfo.Sha256 -PlanPath $sbPlan -VerificationPath $sbVer -CandidatesOverride $cands -Confirm:$false
+    $tmpLeftovers = @(Get-ChildItem -LiteralPath $e2eDir -Force | Where-Object { $_.Name -like 'VERIFICATION.md.tmp.*' -or $_.Name -like 'VERIFICATION.md.bak.*' })
+    Assert-True ($applyOut.Outcome -eq 'Succeeded' -and (-not (Test-Path -LiteralPath $accFile)) -and (Test-Path -LiteralPath $fullFile) -and (Test-Path -LiteralPath $reviewFile) -and ($tmpLeftovers.Count -eq 0)) 'policy-scoped apply removes only approved policy Ready items with clean atomic ledger'
+
+    Assert-Throws { Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $planInfo.Sha256 -PlanPath $sbPlan -VerificationPath $sbVer -CandidatesOverride $cands -Confirm:$false } 'replay of consumed manifest hash (same policy) rejected'
+    Assert-Throws { Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $planInfo.Sha256 -PlanPath $sbPlan -VerificationPath $sbVer -CandidatesOverride $cands -Confirm:$false } 'replay of consumed manifest hash (cross-policy) rejected'
+
+    # 10. Finding 2: Execution ledger corruption, truncation, and durable write failure checks
+    $corruptDir = Join-Path $sandbox 'ledger-corrupt'
+    New-Item -ItemType Directory -Path $corruptDir | Out-Null
+    $truncLedger = Join-Path $corruptDir 'TRUNC.md'
+    [IO.File]::WriteAllText($truncLedger, "# Execution verification log`r`n`r`n<!-- EXECUTION-LEDGER-BEGIN -->`r`n[{", (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Get-ExecutionLedgerEntries -VerificationPath $truncLedger } 'truncated ledger fails closed'
+
+    $strippedLedger = Join-Path $corruptDir 'STRIPPED.md'
+    [IO.File]::WriteAllText($strippedLedger, "# Execution verification log`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Get-ExecutionLedgerEntries -VerificationPath $strippedLedger } 'ledger missing markers after execution header fails closed'
+
+    $badSchemaLedger = Join-Path $corruptDir 'BADSCHEMA.md'
+    [IO.File]::WriteAllText($badSchemaLedger, "<!-- EXECUTION-LEDGER-BEGIN -->`r`n[{`"PlanId`":`"not-a-guid`"}]`r`n<!-- EXECUTION-LEDGER-END -->", (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Throws { Get-ExecutionLedgerEntries -VerificationPath $badSchemaLedger } 'malformed ledger schema rejected'
+    $corruptVerOut = Invoke-CleanupVerify -PlanPath $sbPlan -VerificationPath $badSchemaLedger -CandidatesOverride $cands
+    Assert-True (-not [string]::IsNullOrEmpty($corruptVerOut.LedgerError)) 'Verify reports corrupted ledger error safely'
+
+    # Simulate durable ledger failure on final commit: Apply must throw rather than claim success
+    $durDir = Join-Path $sandbox 'durable-fail'
+    New-Item -ItemType Directory -Path $durDir | Out-Null
+    $durFile = Join-Path $durDir 'd.dat'
+    Set-Content -LiteralPath $durFile -Value 'd'
+    $durCands = @(Get-Candidate -Id 'dur-1' -Path $durFile -Category 'Test' -Policy 'AccountData' -Decision 'Ready')
+    $durPlan = Join-Path $durDir 'PLAN.md'
+    $durVer = Join-Path $durDir 'VERIFICATION.md'
+    $durInfo = Invoke-CleanupPlan -PlanPath $durPlan -CandidatesOverride $durCands
+    $origSaveLedger = (Get-Item Function:\Save-ExecutionLedgerEntry).ScriptBlock
+    $script:origSaveLedgerForTest = $origSaveLedger
+    try {
+        Set-Item Function:\Save-ExecutionLedgerEntry -Value {
+            param([string]$VerificationPath, [object]$Entry, [switch]$UpdateExisting)
+            if ($UpdateExisting) { throw [System.IO.IOException]::new('Simulated disk write failure on ledger commit') }
+            & $script:origSaveLedgerForTest -VerificationPath $VerificationPath -Entry $Entry
+        }
+        Assert-Throws { Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $durInfo.Sha256 -PlanPath $durPlan -VerificationPath $durVer -CandidatesOverride $durCands -Confirm:$false } 'durable ledger commit failure prevents success claim'
+    } finally {
+        Set-Item Function:\Save-ExecutionLedgerEntry -Value $origSaveLedger
+    }
+
+    # 11. Finding 3: Non-destructive & mocked RegistryKey safety validation (no live HKCU writes)
+    Assert-Throws { Invoke-RegistryLeafKeyDeletion -Path 'HKCU:\Software\NotClaude\FakeKey' -ExpectedDefaultValue '' } 'non-allowlisted registry key rejected'
+    Assert-Throws { [ClaudeCleanup.NativeFs]::DeleteHkcuLeafKeySafely('Software\..\Evil', '') } 'malformed registry subkey path rejected'
+    $regFakeKey = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension'
+    $regCand = Get-Candidate -Id 'mock-reg' -Path $regFakeKey -Category 'Browser native host registration' -Policy 'FullRemoval' -Kind 'RegistryKey' -Decision 'Ready'
+    $regTestDir = Join-Path $sandbox 'reg-mock'
+    New-Item -ItemType Directory -Path $regTestDir | Out-Null
+    $regPlanPath = Join-Path $regTestDir 'PLAN.md'
+    $regVerPath = Join-Path $regTestDir 'VERIFICATION.md'
+    $regMockRecord = [pscustomobject]@{
+        Id = 'mock-reg'; Path = $regFakeKey; Category = 'Browser native host registration'
+        Policy = 'FullRemoval'; Kind = 'RegistryKey'; Decision = 'Ready'
+        SizeBytes = $null; Entries = $null; LastWriteUtcTicks = $null
+        MaxLastWriteUtcTicks = $null; VolumeSerialNumber = $null; FileIndex = $null
+        Identity = 'C:\Program Files\Claude\fake.json'; Reason = ''; Warning = ''; Ownership = 'Confirmed Claude path or registration'
+    }
+    $regPlanSha = Write-PlanDocument -Records @($regMockRecord) -PlanPath $regPlanPath
+    $origAssertCurrent = (Get-Item Function:\Assert-CurrentRecord).ScriptBlock
+    $origRegDelete = (Get-Item Function:\Invoke-RegistryLeafKeyDeletion).ScriptBlock
+    $origRecPresence = (Get-Item Function:\Get-RecordPresenceState).ScriptBlock
+    try {
+        Set-Item Function:\Assert-CurrentRecord -Value { param($Record, $Candidates) }
+        Set-Item Function:\Invoke-RegistryLeafKeyDeletion -Value {
+            param([string]$Path, [string]$ExpectedDefaultValue)
+            $script:mockRegDeletedPath = $Path
+        }
+        Set-Item Function:\Get-RecordPresenceState -Value {
+            param($Record)
+            return [pscustomobject]@{ State = 'Absent'; Error = '' }
+        }
+        $mockRegOut = Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $regPlanSha -PlanPath $regPlanPath -VerificationPath $regVerPath -CandidatesOverride @($regCand) -Confirm:$false
+        Assert-True ($mockRegOut.Outcome -eq 'Succeeded' -and $script:mockRegDeletedPath -eq $regFakeKey -and $mockRegOut.Results[0].VerifiedAbsent) 'mocked registry deletion succeeds and verifies absence'
+
+        # Mock post-delete Unknown state -> must fail closed
+        $regPlanSha2 = Write-PlanDocument -Records @($regMockRecord) -PlanPath $regPlanPath
+        Set-Item Function:\Get-RecordPresenceState -Value {
+            param($Record)
+            return [pscustomobject]@{ State = 'Unknown'; Error = 'Simulated registry query denied' }
+        }
+        Assert-Throws { Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $regPlanSha2 -PlanPath $regPlanPath -VerificationPath $regVerPath -CandidatesOverride @($regCand) -Confirm:$false } 'mocked registry Unknown post-check fails closed'
+    } finally {
+        Set-Item Function:\Assert-CurrentRecord -Value $origAssertCurrent
+        Set-Item Function:\Invoke-RegistryLeafKeyDeletion -Value $origRegDelete
+        Set-Item Function:\Get-RecordPresenceState -Value $origRecPresence
+    }
+
+    $notExecuted += 4
+    Write-Output 'NOT_EXECUTED: live HKCU leaf key creation and NtDeleteKey deletion (restricted by authorization)'
+    Write-Output 'NOT_EXECUTED: live HKCU subkey-present rejection (restricted by authorization)'
+    Write-Output 'NOT_EXECUTED: live HKCU registry symbolic-link rejection (restricted by authorization)'
+    Write-Output 'NOT_EXECUTED: live mixed-ownership child file created by another Windows SID (ACL/ownership changes forbidden in sandbox)'
+
+    # 12. Multi-target partial failure + Verify post-check
+    $pfDir = Join-Path $sandbox 'pf'
+    New-Item -ItemType Directory -Path $pfDir | Out-Null
+    $t1 = Join-Path $pfDir 't1.txt'
+    $t2 = Join-Path $pfDir 't2.txt'
+    $t3 = Join-Path $pfDir 't3.txt'
+    Set-Content -LiteralPath $t1 -Value '1'
+    Set-Content -LiteralPath $t2 -Value '2'
+    Set-Content -LiteralPath $t3 -Value '3'
+    $pfCands = @(
+        (Get-Candidate -Id 'pf-1' -Path $t1 -Category 'Test' -Policy 'FullRemoval' -Decision 'Ready'),
+        (Get-Candidate -Id 'pf-2' -Path $t2 -Category 'Test' -Policy 'FullRemoval' -Decision 'Ready'),
+        (Get-Candidate -Id 'pf-3' -Path $t3 -Category 'Test' -Policy 'FullRemoval' -Decision 'Ready')
+    )
+    $pfPlan = Join-Path $pfDir 'PLAN.md'
+    $pfVer = Join-Path $pfDir 'VERIFICATION.md'
+    $pfInfo = Invoke-CleanupPlan -PlanPath $pfPlan -CandidatesOverride $pfCands
+
+    $pfLock = [IO.File]::Open($t2, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    $openStreams.Add($pfLock)
+    $pfApplyEx = $null
+    try {
+        try {
+            Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $pfInfo.Sha256 -PlanPath $pfPlan -VerificationPath $pfVer -CandidatesOverride $pfCands -Confirm:$false | Out-Null
+        } catch {
+            $pfApplyEx = $_
+        }
+    } finally {
+        Unlock-Safely $pfLock
+        $openStreams.Remove($pfLock) | Out-Null
+    }
+    Assert-True ($null -ne $pfApplyEx -and $null -ne $pfApplyEx.Exception.Data['ApplyResult']) 'multi-target failure throws structured ApplyResult'
+    $ar = $pfApplyEx.Exception.Data['ApplyResult']
+    $s1 = @($ar.Results | Where-Object { $_.Id -eq 'pf-1' })[0].Status
+    $s2 = @($ar.Results | Where-Object { $_.Id -eq 'pf-2' })[0].Status
+    $s3 = @($ar.Results | Where-Object { $_.Id -eq 'pf-3' })[0].Status
+    Assert-True ($ar.Outcome -eq 'PartialFailure' -and $s1 -eq 'Removed' -and $s2 -eq 'Failed' -and $s3 -eq 'NotExecuted') 'partial failure records Removed, Failed, and NotExecuted accurately'
+
+    $verOut = Invoke-CleanupVerify -PlanPath $pfPlan -VerificationPath $pfVer -CandidatesOverride $pfCands
+    $v1 = @($verOut.PlanChecks | Where-Object { $_.Id -eq 'pf-1' })[0]
+    $v2 = @($verOut.PlanChecks | Where-Object { $_.Id -eq 'pf-2' })[0]
+    $v3 = @($verOut.PlanChecks | Where-Object { $_.Id -eq 'pf-3' })[0]
+    Assert-True (($v1.PresenceState -eq 'Absent') -and ($v2.PresenceState -eq 'Present') -and ($v3.PresenceState -eq 'Present') -and $verOut.LedgerEntries.Count -eq 1 -and $verOut.LedgerEntries[0].Outcome -eq 'PartialFailure') 'post-apply Verify reports exact 3-state presence and ledger outcome'
+
+    Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; 0 failed"
 } finally {
+    foreach ($s in $openStreams) { Unlock-Safely $s }
     if (Test-Path -LiteralPath $sandbox) {
-        try { Assert-TreeWithoutLinks -Path $sandbox; Remove-SafeTree -Path $sandbox }
-        catch { Write-Warning "Sandbox retained for manual review: $sandbox ($($_.Exception.Message))" }
+        try {
+            Invoke-SafeFileRemoval -Path $sandbox -AllowedRoots @($sandbox) -Confirm:$false | Out-Null
+        } catch {
+            Write-Warning "Sandbox retained for manual review: $sandbox ($($_.Exception.Message))"
+        }
     }
 }
