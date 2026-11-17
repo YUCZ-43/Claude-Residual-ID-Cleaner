@@ -1,16 +1,16 @@
 [English](README.md) | **简体中文**
 
-# Windows Claude Cleanup Toolkit
+# Claude 账号残余 ID 清理工具 (`Claude Residual ID Cleaner`)
 
-专用于 Windows 平台的**无破坏性本地残余清理与原生桌面工具**：针对 Claude 账号被封禁（Ban）后遗留的本地账号/设备元数据、授权缓存、会话存储、扩展与注册残余进行**只读扫描与受控安全清理** —— **绝不改动或损害 Windows 操作系统本身**。
+**Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner)** —— 专为清理 Claude 封号后残留在设备中的账号/设备 ID、认证 Token 与会话缓存而设计的独立 Windows 桌面应用（`.exe`）与原生 PowerShell 工具，**绝不改动 Windows 系统本身**。
 
 ---
 
 ## 1. 项目简介
 
-本工具专为清理 Windows 用户目录下与 Claude Code 及 Claude Desktop 相关的封号后本地残留而设计，覆盖 Claude Code CLI 配置、Claude Desktop 本地存储、VS Code/Cursor/Windsurf 扩展、MSIX 包、环境变量名、Windows Credential Manager 条目计数以及浏览器 Native Messaging 注册项。工具将只读审计（`-Audit`）、清单规划（`-Plan`）、预览/确认执行（`-Apply`）与独立核验（`-Verify`）严格分离，**绝不改动 Windows 系统文件、无关软件、浏览器个人数据、操作系统硬件/设备 ID 或 WSL 发行版**。
+本工具专为清理 Windows 用户目录下与 Claude Code 及 Claude Desktop 相关的封号后本地残留而设计，覆盖 Claude Code CLI 配置与 ID、Claude Desktop 本地存储与会话、VS Code/Cursor/Windsurf 扩展、MSIX 包、环境变量名、Windows Credential Manager 条目计数以及浏览器 Native Messaging 注册项。工具将只读审计（`-Audit`）、清单规划（`-Plan`）、预览/确认执行（`-Apply`）与独立核验（`-Verify`）严格分离，**绝不改动 Windows 系统文件、无关软件、浏览器个人数据、操作系统硬件/设备 ID 或 WSL 发行版**。
 
-所有检测与清理操作均通过单一经过严格测试的核心引擎（[ClaudeCleanup.ps1](ClaudeCleanup.ps1)）执行，并原生支持 **简体中文 / English 双语无缝切换（`-Language Auto|zh-CN|en-US`）**。您可通过零外部依赖的 **Windows 原生桌面 GUI（[ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) / [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)）**、安全菜单启动器（[ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)）、PowerShell CLI 或跨代理 Skill（[skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)）运行本工具。
+所有检测与清理操作均通过单一核心引擎（[ClaudeCleanup.ps1](ClaudeCleanup.ps1)）执行，并支持 **简体中文 / English 双语无缝切换（`-Language Auto|zh-CN|en-US`）**。您可通过 [scripts/Build-DesktopApp.ps1](scripts/Build-DesktopApp.ps1) 一键编译无控制台黑框的 **独立 Windows WPF 桌面软件（`dist/Claude-Residual-ID-Cleaner.exe`，源码位于 [src/Gui/](src/Gui/)）**，也可直接运行脚本版 WinForms GUI（[ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd)）、菜单启动器（[ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)）、PowerShell CLI 或跨代理 Skill（[skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)）。
 
 ## 2. 当前发布状态
 
@@ -23,7 +23,8 @@
 ### 已实现能力
 - **封号残余扫描与白名单安全清理**：覆盖 Claude Code CLI 配置与元数据（`.claude`、`.claude.json`、`.local\bin\claude.exe`、npm `@anthropic-ai/claude-code`）、Claude Desktop 本地缓存与 MSIX（`%APPDATA%\Claude`、`%LOCALAPPDATA%\Claude`、`Claude_pzs8sxrjxfjjc`）、VS Code/Cursor/Windsurf 扩展（`anthropic.claude-code`）及 HKCU 浏览器注册表键、快捷方式、环境变量**仅名称**（绝不读取秘密值）、`PATH` 残留、Credential Manager 目标计数（不读取或删除秘密值）、AppData 分类、ACL/所有者/重解析点只读诊断及 WSL 只读报告。
 - **双语运行时切换（`-Language Auto|zh-CN|en-US`）**：在中文 Windows 系统下通过 `Auto` 自动启用简体中文，或手动在 `zh-CN` / `en-US` 间切换；自动配置 UTF-8 控制台防乱码，并本地化 `AUDIT.md`、`CLEANUP-PLAN.md`、`VERIFICATION.md` Markdown 报告（保持 JSON Schema 键名严格不变）。
-- **零依赖 Windows 原生桌面 GUI（[ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd)）**：基于系统内置 WinForms（[scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)），顶部带 **中 / EN** 一键切换按钮与系统安全徽章，提供 5 类目标范围勾选面板、分步按钮（`1. 仅扫描体检`、`2. 生成清理方案`、扫描规划前禁用的 `3. 执行安全清理` 配合 `-WhatIf` 预览与精确路径确认弹窗、`4. 核验清理结果`）以及 `AUDIT.md` / `CLEANUP-PLAN.md` 快捷查看。
+- **独立 Windows 桌面应用（`Claude-Residual-ID-Cleaner.exe`）**：基于系统内置 .NET Framework 4.x WPF 编译生成的单文件无黑框可执行程序（[src/Gui/Program.cs](src/Gui/Program.cs)、[src/Gui/Localization.cs](src/Gui/Localization.cs)，通过 [scripts/Build-DesktopApp.ps1](scripts/Build-DesktopApp.ps1) 离线构建）。顶部具备绿色安全承诺徽章（*“仅清理 Claude 封号残余数据 · 绝不改动 Windows 系统”*）与 **中文 / English** 实时切换（中文 Windows 默认简体中文），包含 5 类交互复选范围、4 步工具栏（`1. 立即扫描体检`、`2. 预览清理方案`、扫描前禁用的 `3. 一键安全清理` 与路径详情弹窗、`4. 清理结果核验`）及结果 DataGrid 与日志抽屉。
+- **免编译脚本版桌面 GUI（[ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd)）**：无需编译即可直接运行的原生 WinForms 桌面入口（[scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)）。
 - **结构化 JSON 输出（`-OutputFormat Json`）**：在 `-Audit`、`-Plan`、`-Verify` 与 `-Apply` 模式下输出 `SchemaVersion = 3` 规范 JSON，键名在任意语言下保持稳定不变。
 - **确定性清单与 Win32 句柄绑定删除**：生成带 GUID 与 SHA-256 的 `CLEANUP-PLAN.md`；基于 `FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS` 打开句柄并校验全树 `OwnerSid` 后通过 `SetFileInformationByHandle` 删除，**绝不回退 `Remove-Item`**。
 - **受控包卸载器（仅 `FullRemoval`）**：严格限定 `@anthropic-ai/claude-code`、`anthropic.claude-code` 与 `Claude_pzs8sxrjxfjjc` 并执行 fail-closed 后置核验。
@@ -67,12 +68,18 @@ powershell.exe -NoProfile -File .\scripts\Install-ClaudeCleanup.ps1 -InstallSkil
 
 ## 7. 快速开始
 
-### 使用原生 Windows 桌面图形界面（推荐）
+### 构建并启动独立桌面软件（`.exe`，无控制台黑框）
+无需任何外网下载，直接利用 Windows 10/11 内置编译器构建 `dist\Claude-Residual-ID-Cleaner.exe` 并启动：
+```powershell
+.\scripts\Build-DesktopApp.ps1
+.\dist\Claude-Residual-ID-Cleaner.exe
+```
+
+### 免编译直接运行脚本版桌面界面
 直接双击 [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) 或在 PowerShell 中运行：
 ```cmd
 .\ClaudeCleanupGUI.cmd
 ```
-界面支持顶部 **中 / EN** 实时切换、5 类封号残余目标勾选、默认只读 **仅扫描体检**、**生成清理方案**、双重确认后的 **执行安全清理**，以及一键 **核验清理结果**。
 
 ### 使用安全控制台菜单启动器
 在命令提示符或 PowerShell 中直接运行：
@@ -172,9 +179,13 @@ pwsh.exe -NoProfile -File .\tests\ToolkitInstall.Tests.ps1
 powershell.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
 
-# 双语切换与原生 Windows GUI 非破坏验证
+# 双语切换与脚本版 WinForms GUI 非破坏验证
 powershell.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
+
+# 独立 WPF Desktop .exe 编译、WinGUI 子系统与无头自检测试
+powershell.exe -NoProfile -File .\tests\DesktopApp.Tests.ps1
+pwsh.exe -NoProfile -File .\tests\DesktopApp.Tests.ps1
 ```
 
 - **权限与授权说明**：在 Windows 上创建符号链接需要管理员权限或开发者模式（`SeCreateSymbolicLinkPrivilege`），非特权会话会将对应符号链接创建用例明确标为 `SKIP`（不计入通过）；若在禁用 `FSCTL_SET_REPARSE_POINT` 的沙箱内运行，junction 创建也会相应跳过；未经单独授权的真实 HKCU 写入、跨 SID 磁盘测试以及真实 `npm` / `code` / `Remove-AppxPackage` 卸载执行均明确标为 `NotExecuted`。

@@ -1,8 +1,8 @@
 **English** | [简体中文](README_zh-CN.md)
 
-# Windows Claude Cleanup Toolkit
+# Windows Claude Cleanup Toolkit (`Claude Residual ID Cleaner`)
 
-A non-destructive Windows PowerShell & native Desktop GUI utility specifically designed to scan and safely clean residual Claude account/device metadata, auth tokens, session caches, extensions, and leftover registrations left behind after a Claude account ban — **strictly without altering or harming the Windows OS itself**.
+**Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner)** — A non-destructive standalone Windows desktop `.exe` and PowerShell toolkit specifically designed to scan and safely clean residual account/device IDs, auth tokens, and session caches left behind after a Claude account ban, **strictly without altering or harming Windows OS itself**.
 
 ---
 
@@ -10,7 +10,7 @@ A non-destructive Windows PowerShell & native Desktop GUI utility specifically d
 
 Windows Claude Cleanup inspects known local installations, configurations, caches, logs, VS Code/Cursor extensions, MSIX packages, environment variable names, Credential Manager target counts, and browser Native Messaging registrations left behind by Claude Code and Claude Desktop on Windows. It separates read-only discovery (`-Audit`), manifest generation (`-Plan`), previewable/confirmed execution (`-Apply`), and independent post-action checking (`-Verify`), **without altering Windows OS system files, unrelated apps, browser profiles, OS hardware/device IDs, or WSL distributions**.
 
-All operations execute through a single tested PowerShell engine ([ClaudeCleanup.ps1](ClaudeCleanup.ps1)) supporting seamless **Simplified Chinese / English (`-Language Auto|zh-CN|en-US`)** switching. You can use it via the native **Windows Desktop GUI** ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) / [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)), the text-mode menu launcher ([ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)), the PowerShell CLI, or the cross-agent Skill ([skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)).
+All operations execute through a single tested PowerShell engine ([ClaudeCleanup.ps1](ClaudeCleanup.ps1)) supporting seamless **Simplified Chinese / English (`-Language Auto|zh-CN|en-US`)** switching. You can build and launch the **standalone zero-console Windows Desktop `.exe`** (`dist/Claude-Residual-ID-Cleaner.exe` compiled cleanly via [scripts/Build-DesktopApp.ps1](scripts/Build-DesktopApp.ps1) from [src/Gui/](src/Gui/)), use the script-based WinForms GUI ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd)), the text-mode menu launcher ([ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)), the PowerShell CLI, or the cross-agent Skill ([skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)).
 
 ## 2. Current Release Status
 
@@ -23,7 +23,8 @@ All operations execute through a single tested PowerShell engine ([ClaudeCleanup
 ### Implemented Capabilities
 - **Post-Ban Residual Scanning & Safe Cleanup Scope**: Targets allowlisted Claude Code CLI configs/IDs (`.claude`, `.claude.json`, `.local\bin\claude.exe`, npm `@anthropic-ai/claude-code`), Claude Desktop local storage/MSIX (`%APPDATA%\Claude`, `%LOCALAPPDATA%\Claude`, `Claude_pzs8sxrjxfjjc`), VS Code / Cursor / Windsurf extensions (`anthropic.claude-code`) and browser Native Messaging HKCU keys, Start Menu / Desktop / Startup `.lnk` shortcuts, Windows services/scheduled tasks, environment variable **names only** (`Scope` + `Name`, never secret values), `PATH` entries, Credential Manager target counts (no secret values read or deleted), AppData role classification, path ACL/owner/reparse diagnostics, and read-only WSL reporting.
 - **Seamless Bilingual Runtime (`-Language Auto|zh-CN|en-US`)**: Automatically selects `zh-CN` on Chinese Windows locales (`zh*`) or switches manually between Simplified Chinese and English with UTF-8 console encoding and localized Markdown reports (`AUDIT.md`, `CLEANUP-PLAN.md`, `VERIFICATION.md`) while keeping JSON schema keys invariant.
-- **Native Windows Desktop GUI ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd))**: Zero-dependency WinForms desktop app ([scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)) with live **中 / EN** switching, OS-safety badge, categorized target-scope checklist, step-by-step buttons (`Scan`, `Preview Plan`, disabled-until-ready `Clean Selected` with mandatory `-WhatIf` preview and explicit path-listing confirmation dialog, `Verify`), and report viewer/quick-open buttons — strictly wrapping [ClaudeCleanup.ps1](ClaudeCleanup.ps1).
+- **Standalone Windows Desktop Application (`Claude-Residual-ID-Cleaner.exe`)**: Native .NET Framework 4.x WPF single-file zero-console `.exe` compiled offline via [scripts/Build-DesktopApp.ps1](scripts/Build-DesktopApp.ps1) from [src/Gui/Program.cs](src/Gui/Program.cs) & [src/Gui/Localization.cs](src/Gui/Localization.cs). Features live **中文 / English** toggling (defaulting to `zh-CN` on Chinese Windows locales), green safety banner (*"仅清理 Claude 封号残余数据 · 绝不改动 Windows 系统"*), 5 interactive target-scope checkboxes, 4-step workflow buttons (`Scan Residuals`, `Preview Plan`, disabled-until-scanned `Clean Selected` with explicit path-listing confirmation modal, `Verify Clean`), results DataGrid (`Select | Category | Path | Status | Details`), and log/report quick buttons — strictly delegating to [ClaudeCleanup.ps1](ClaudeCleanup.ps1).
+- **Zero-Dependency Script GUI ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd))**: Companion WinForms entrypoint ([scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)) for script-only execution without compiling.
 - **Structured JSON Output (`-OutputFormat Json`)**: Supports machine-readable JSON output (`SchemaVersion = 3`) alongside text reports across `-Audit`, `-Plan`, `-Verify`, and `-Apply`.
 - **Deterministic Cleanup Plan (`-Plan`) & Win32 Handle-Bound Deletion**: Generates `CLEANUP-PLAN.md` with GUID `PlanId` and SHA-256 binding; deletes filesystem nodes via `SetFileInformationByHandle` (`FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS`), enforcing current user `OwnerSid` on every node, rejecting reparse points, and zero `Remove-Item` fallback.
 - **Controlled Package Uninstallers (`FullRemoval`)**: Strictly scoped handlers for npm (`@anthropic-ai/claude-code`), VS Code (`code --uninstall-extension anthropic.claude-code`), and MSIX (`Remove-AppxPackage Claude_pzs8sxrjxfjjc`), each with fail-closed post-verification.
@@ -67,12 +68,18 @@ powershell.exe -NoProfile -File .\scripts\Install-ClaudeCleanup.ps1 -InstallSkil
 
 ## 7. Quick Start
 
-### Using the Native Windows Desktop GUI (Recommended)
+### Building & Launching the Standalone Desktop `.exe` (Zero Console Window)
+Build `dist/Claude-Residual-ID-Cleaner.exe` using stock Windows tools (zero external SDK or NuGet downloads required):
+```powershell
+.\scripts\Build-DesktopApp.ps1
+.\dist\Claude-Residual-ID-Cleaner.exe
+```
+
+### Using the Script-Based GUI Without Compiling
 Double-click [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) or run from PowerShell:
 ```cmd
 .\ClaudeCleanupGUI.cmd
 ```
-Features live **中 / EN** language switching, categorized target-scope checkboxes, read-only default **Scan**, **Preview Plan**, confirmation-gated **Clean Selected**, and **Verify**.
 
 ### Using the Safe Console Menu Launcher
 Run from Command Prompt or PowerShell:
@@ -172,9 +179,13 @@ pwsh.exe -NoProfile -File .\tests\ToolkitInstall.Tests.ps1
 powershell.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
 
-# Bilingual locale switching & native Desktop GUI validation
+# Bilingual locale switching & WinForms GUI validation
 powershell.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
+
+# Standalone WPF Desktop .exe compilation, subsystem, and self-test suite
+powershell.exe -NoProfile -File .\tests\DesktopApp.Tests.ps1
+pwsh.exe -NoProfile -File .\tests\DesktopApp.Tests.ps1
 ```
 
 - **Permission & Authorization Note**: Creating Windows symbolic links requires Administrator or Developer Mode privileges (`SeCreateSymbolicLinkPrivilege`); unprivileged sessions explicitly report those symlink creation cases as `SKIP` (and restricted app-container sandboxes may also block `FSCTL_SET_REPARSE_POINT` junction creation). Live HKCU write/delete, cross-SID mixed-ownership disk tests, and live `npm` / `code` / `Remove-AppxPackage` uninstall calls remain explicitly reported as `NotExecuted` during sandboxed testing.

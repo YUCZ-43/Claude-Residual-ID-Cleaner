@@ -121,7 +121,7 @@ function Assert-FilePrivacySafe {
 
     $ext = [IO.Path]::GetExtension($FilePath)
     $leaf = [IO.Path]::GetFileName($FilePath)
-    $textExtensions = @('.ps1', '.psm1', '.psd1', '.py', '.md', '.yml', '.yaml', '.json', '.cmd', '.txt', '.gitignore')
+    $textExtensions = @('.ps1', '.psm1', '.psd1', '.py', '.cs', '.md', '.yml', '.yaml', '.json', '.cmd', '.txt', '.gitignore')
     if (($ext -notin $textExtensions) -and (-not $leaf.Equals('.gitignore', [StringComparison]::OrdinalIgnoreCase))) {
         return
     }

@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Stage H (Desktop `.exe` Upgrade) — Standalone Zero-Console Windows WPF Desktop Application**:
+  - Added native .NET Framework 4.x WPF C# desktop app ([src/Gui/Program.cs](src/Gui/Program.cs), [src/Gui/Localization.cs](src/Gui/Localization.cs)) and offline single-file build script ([scripts/Build-DesktopApp.ps1](scripts/Build-DesktopApp.ps1)) producing `dist/Claude-Residual-ID-Cleaner.exe` (`IMAGE_SUBSYSTEM_WINDOWS_GUI`, zero console window).
+  - Positioned clearly as *"Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner) — 专为清理 Claude 封号后残留在设备中的账号/设备 ID、认证 Token 与会话缓存而设计，绝不改动 Windows 系统本身"*.
+  - Added CI build + `--headless --self-test` verification in [.github/workflows/ci.yml](.github/workflows/ci.yml) and dedicated [tests/DesktopApp.Tests.ps1](tests/DesktopApp.Tests.ps1).
 - **Stage H — Native Desktop GUI, Bilingual Runtime (`zh-CN`/`en-US`), & Post-Ban Residual Positioning**:
   - Added zero-dependency native WinForms Desktop GUI ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) + [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)) with live **中 / EN** switching, OS-safety badge, 5-category scope checklist, disabled-until-ready cleanup button, explicit `-WhatIf` + SHA-256 confirmation dialog, and report viewer.
   - Added `-Language Auto|zh-CN|en-US` (with Chinese locale auto-detection and UTF-8 console output) plus `-SaveAuditReport` across [ClaudeCleanup.ps1](ClaudeCleanup.ps1), [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1) (adding `[6] Launch GUI` & `[L] Switch Lang`), and [Install/Update/Uninstall-ClaudeCleanup.ps1](scripts/Install-ClaudeCleanup.ps1), while keeping JSON schema keys strictly invariant.
