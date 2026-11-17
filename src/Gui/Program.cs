@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -10,17 +11,47 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Microsoft.Win32;
 
 namespace ClaudeResidualIdCleaner
 {
-    public sealed class ResidualGridRow
+    public sealed class ResidualGridRow : INotifyPropertyChanged
     {
-        public bool Selected { get; set; }
+        private bool _selected;
+        private string _status;
+        private string _statusTone;
+
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        private void Notify(string name)
+        {
+            PropertyChangedEventHandler handler = PropertyChanged;
+            if (handler != null)
+            {
+                handler(this, new PropertyChangedEventArgs(name));
+            }
+        }
+
+        public bool Selected
+        {
+            get { return _selected; }
+            set
+            {
+                if (_selected != value)
+                {
+                    _selected = value;
+                    Notify("Selected");
+                }
+            }
+        }
+
         public bool CanSelect { get; set; }
         public string ScopeKey { get; set; }
         public string Policy { get; set; }
@@ -28,8 +59,36 @@ namespace ClaudeResidualIdCleaner
         public string Kind { get; set; }
         public string Category { get; set; }
         public string PathOrPackage { get; set; }
-        public string Status { get; set; }
-        public string StatusTone { get; set; }
+
+        public string Status
+        {
+            get { return _status; }
+            set
+            {
+                if (_status != value)
+                {
+                    _status = value;
+                    Notify("Status");
+                }
+            }
+        }
+
+        public string StatusTone
+        {
+            get { return _statusTone; }
+            set
+            {
+                if (_statusTone != value)
+                {
+                    _statusTone = value;
+                    Notify("StatusTone");
+                    Notify("StatusBg");
+                    Notify("StatusBorder");
+                    Notify("StatusFg");
+                }
+            }
+        }
+
         public string Decision { get; set; }
         public string Details { get; set; }
         public long SizeBytes { get; set; }
@@ -41,6 +100,7 @@ namespace ClaudeResidualIdCleaner
                 if (StatusTone == "Ready") return MainWindow.BrushBadgeReadyBg;
                 if (StatusTone == "ReadOnly") return MainWindow.BrushBadgeReadOnlyBg;
                 if (StatusTone == "Clean") return MainWindow.BrushBadgeCleanBg;
+                if (StatusTone == "Excluded") return MainWindow.BrushBadgeExcludedBg;
                 return MainWindow.BrushBadgeProtectedBg;
             }
         }
@@ -52,6 +112,7 @@ namespace ClaudeResidualIdCleaner
                 if (StatusTone == "Ready") return MainWindow.BrushBadgeReadyBorder;
                 if (StatusTone == "ReadOnly") return MainWindow.BrushBadgeReadOnlyBorder;
                 if (StatusTone == "Clean") return MainWindow.BrushBadgeCleanBorder;
+                if (StatusTone == "Excluded") return MainWindow.BrushBadgeExcludedBorder;
                 return MainWindow.BrushBadgeProtectedBorder;
             }
         }
@@ -63,9 +124,19 @@ namespace ClaudeResidualIdCleaner
                 if (StatusTone == "Ready") return MainWindow.BrushBadgeReadyFg;
                 if (StatusTone == "ReadOnly") return MainWindow.BrushBadgeReadOnlyFg;
                 if (StatusTone == "Clean") return MainWindow.BrushBadgeCleanFg;
+                if (StatusTone == "Excluded") return MainWindow.BrushBadgeExcludedFg;
                 return MainWindow.BrushBadgeProtectedFg;
             }
         }
+    }
+
+    internal sealed class ResidualAccountIdRecord
+    {
+        public string Source;
+        public string IdType;
+        public string Field;
+        public string Value;
+        public string ConfigPath;
     }
 
     internal sealed class BackendRunResult
@@ -93,6 +164,10 @@ namespace ClaudeResidualIdCleaner
         public int NavTabCount;
         public int MetricCardCount;
         public string ThemeStyle;
+        public bool HasGridSplitter;
+        public bool HasAccountIdCard;
+        public bool HorizontalScrollEnabled;
+        public int AccountIdCount;
     }
 
     public sealed class MainWindow : Window
@@ -126,9 +201,12 @@ namespace ClaudeResidualIdCleaner
         internal static readonly Brush BrushBadgeCleanBg = CreateBrush(18, 53, 36);
         internal static readonly Brush BrushBadgeCleanBorder = CreateBrush(34, 197, 94);
         internal static readonly Brush BrushBadgeCleanFg = CreateBrush(134, 239, 172);
-        internal static readonly Brush BrushBadgeProtectedBg = CreateBrush(46, 46, 52);
-        internal static readonly Brush BrushBadgeProtectedBorder = CreateBrush(107, 114, 128);
-        internal static readonly Brush BrushBadgeProtectedFg = CreateBrush(209, 213, 219);
+        internal static readonly Brush BrushBadgeExcludedBg = CreateBrush(44, 46, 54);
+        internal static readonly Brush BrushBadgeExcludedBorder = CreateBrush(107, 114, 128);
+        internal static readonly Brush BrushBadgeExcludedFg = CreateBrush(209, 213, 219);
+        internal static readonly Brush BrushBadgeProtectedBg = CreateBrush(58, 28, 52);
+        internal static readonly Brush BrushBadgeProtectedBorder = CreateBrush(217, 70, 239);
+        internal static readonly Brush BrushBadgeProtectedFg = CreateBrush(245, 208, 254);
 
         private string _lang;
         private string _toolkitRoot;
@@ -136,13 +214,17 @@ namespace ClaudeResidualIdCleaner
         private readonly bool _demoAudit;
         private int _activeNavIndex;
         private bool _logsExpanded;
+        private double _lastLogHeight = 115.0;
         private bool _hasScanned;
         private bool _hasPlan;
         private string _planSha256 = string.Empty;
         private int _readyCount;
+        private string _lastVerifySummaryText = string.Empty;
+        private bool _suppressSelectAllSync;
 
         private readonly ObservableCollection<ResidualGridRow> _allRows = new ObservableCollection<ResidualGridRow>();
         private readonly ObservableCollection<ResidualGridRow> _visibleRows = new ObservableCollection<ResidualGridRow>();
+        private readonly List<ResidualAccountIdRecord> _accountIdRecords = new List<ResidualAccountIdRecord>();
 
         private readonly List<Button> _navButtons = new List<Button>();
         private readonly List<Border> _navIndicators = new List<Border>();
@@ -167,6 +249,37 @@ namespace ClaudeResidualIdCleaner
 
         private Grid _workspacePanel;
         private ScrollViewer _aboutPanel;
+
+        private Border _accountIdCard;
+        private TextBlock _lblAccountIdCardTitle;
+        private TextBlock _lblAccountIdCardSub;
+        private TextBox _txtAccountIdValue;
+        private Button _btnCopyAccountId;
+
+        private StackPanel _viewScanSection;
+        private Border _viewPlanCard;
+        private TextBlock _lblPlanViewTitle;
+        private TextBlock _lblPlanViewSub;
+        private TextBlock _lblPlanShaLabel;
+        private TextBox _txtPlanShaValue;
+        private Button _btnPlanViewGenerate;
+        private Button _btnPlanViewSwitchAccount;
+        private Button _btnPlanViewSwitchFull;
+
+        private Border _viewCleanCard;
+        private TextBlock _lblCleanViewTitle;
+        private TextBlock _lblCleanViewSub;
+        private Border _cleanGateBadge;
+        private TextBlock _lblCleanGateStatus;
+        private Button _btnCleanViewExecute;
+
+        private Border _viewVerifyCard;
+        private TextBlock _lblVerifyViewTitle;
+        private TextBlock _lblVerifyViewSub;
+        private TextBlock _lblVerifySummary;
+        private Button _btnVerifyViewRun;
+        private Button _btnVerifyViewExport;
+        private Button _btnVerifyViewFolder;
 
         private TextBlock _lblMetricScannedTitle;
         private TextBlock _lblMetricScannedValue;
@@ -202,6 +315,11 @@ namespace ClaudeResidualIdCleaner
         private Button _btnExportSummary;
         private Button _btnToggleLogs;
 
+        private TextBlock _lblPresetLabel;
+        private Button _btnPresetAccount;
+        private Button _btnPresetFull;
+        private CheckBox _chkSelectAll;
+
         private DataGrid _gridResults;
         private DataGridCheckBoxColumn _colSelect;
         private DataGridTextColumn _colCategory;
@@ -210,6 +328,7 @@ namespace ClaudeResidualIdCleaner
         private DataGridTextColumn _colDetails;
         private TextBlock _lblGridEmptyHint;
 
+        private GridSplitter _logSplitter;
         private Border _logDrawerPanel;
         private RowDefinition _logDrawerRow;
         private TextBlock _lblLogDrawerTitle;
@@ -253,10 +372,10 @@ namespace ClaudeResidualIdCleaner
             _logsExpanded = demoAudit;
             _toolkitRoot = ResolveToolkitRoot(toolkitRootOverride);
 
-            Width = 1320;
-            Height = 840;
+            Width = 1360;
+            Height = 920;
             MinWidth = 1040;
-            MinHeight = 700;
+            MinHeight = 760;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Background = BrushBgOuter;
             Foreground = BrushTextPrimary;
@@ -269,6 +388,7 @@ namespace ClaudeResidualIdCleaner
 
             ApplyDarkResources();
             BuildLayout();
+            SizeChanged += OnMainWindowSizeChanged;
             if (_demoAudit)
             {
                 PopulateDemoAuditData();
@@ -277,7 +397,17 @@ namespace ClaudeResidualIdCleaner
             SelectNavTab(_activeNavIndex);
             UpdateLogDrawerVisibility();
             UpdateMetricCards();
+            UpdateAccountIdCard();
             AppendLog("Toolkit root: " + (string.IsNullOrEmpty(_toolkitRoot) ? "<not resolved>" : _toolkitRoot));
+        }
+
+        private void OnMainWindowSizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (_logDrawerRow != null && _logsExpanded)
+            {
+                double maxAllowed = Math.Max(110.0, Math.Floor(ActualHeight * 0.60));
+                _logDrawerRow.MaxHeight = maxAllowed;
+            }
         }
 
         private void ApplyDarkResources()
@@ -546,7 +676,8 @@ namespace ClaudeResidualIdCleaner
                 BorderThickness=""1""
                 CornerRadius=""10""
                 Padding=""8,2""
-                HorizontalAlignment=""Left"">
+                HorizontalAlignment=""Left""
+                ToolTip=""{Binding Status}"">
             <TextBlock Text=""{Binding Status}""
                        Foreground=""{Binding StatusFg}""
                        FontSize=""11.5""
@@ -1001,21 +1132,26 @@ namespace ClaudeResidualIdCleaner
         private Grid BuildWorkspacePanel()
         {
             var wsGrid = new Grid();
-            wsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 0: 4 KPI Metric Cards
-            wsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 1: Scope + Policy 2-col row
-            wsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 2: Action Toolbar
-            wsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 3: DataGrid
-            _logDrawerRow = new RowDefinition { Height = GridLength.Auto };
-            wsGrid.RowDefinitions.Add(_logDrawerRow); // 4: Collapsible Log Drawer
+            wsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 0: Step-specific top view cards + Account ID card
+            wsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 1: Shared Action Toolbar + Quick Presets
+            wsGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star), MinHeight = 160 }); // 2: Horizontal Scrollable DataGrid
+            wsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 3: Horizontal GridSplitter
+            _logDrawerRow = new RowDefinition { Height = new GridLength(110), MinHeight = 80, MaxHeight = 520 };
+            wsGrid.RowDefinitions.Add(_logDrawerRow); // 4: Freely Resizable Log Drawer
 
-            // 0. 4 KPI Metric Summary Cards
-            var metricsGrid = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            // 0. Stacked Multi-View Stage Host (Tabs 0..3)
+            var topViewHost = new StackPanel { Orientation = Orientation.Vertical };
+
+            // --- TAB 0: Scan View (Metrics + Account ID Card + Scope & Policy Cards) ---
+            _viewScanSection = new StackPanel { Orientation = Orientation.Vertical };
+
+            var metricsGrid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
             for (int c = 0; c < 4; c++)
             {
                 metricsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 if (c < 3)
                 {
-                    metricsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+                    metricsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
                 }
             }
             _metricCards.Clear();
@@ -1042,13 +1178,74 @@ namespace ClaudeResidualIdCleaner
             metricsGrid.Children.Add(card4);
             _metricCards.Add(card4);
 
-            Grid.SetRow(metricsGrid, 0);
-            wsGrid.Children.Add(metricsGrid);
+            _viewScanSection.Children.Add(metricsGrid);
 
-            // 1. Scope Checklist + Policy Selector (2-column card row)
-            var topCards = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            // Detected Residual Account IDs Summary Card (Non-Secret UUIDs Only)
+            _accountIdCard = new Border
+            {
+                Background = BrushBgCard,
+                BorderBrush = BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 8, 12, 8),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            var aidGrid = new Grid();
+            aidGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            aidGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var aidLeft = new StackPanel { Orientation = Orientation.Vertical };
+            var aidHeaderRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+            _lblAccountIdCardTitle = new TextBlock
+            {
+                Foreground = BrushAccentBright,
+                FontSize = 11.5,
+                FontWeight = FontWeights.Bold,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            _lblAccountIdCardSub = new TextBlock
+            {
+                Foreground = BrushTextMuted,
+                FontSize = 11,
+                Margin = new Thickness(10, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            aidHeaderRow.Children.Add(_lblAccountIdCardTitle);
+            aidHeaderRow.Children.Add(_lblAccountIdCardSub);
+
+            _txtAccountIdValue = new TextBox
+            {
+                IsReadOnly = true,
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                Foreground = BrushTextPrimary,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 11.5,
+                TextWrapping = TextWrapping.Wrap,
+                Padding = new Thickness(0)
+            };
+
+            aidLeft.Children.Add(aidHeaderRow);
+            aidLeft.Children.Add(_txtAccountIdValue);
+
+            _btnCopyAccountId = CreateActionButton(BrushBgElevated, BrushBorderSubtle, BrushTextPrimary);
+            _btnCopyAccountId.Margin = new Thickness(12, 0, 0, 0);
+            _btnCopyAccountId.VerticalAlignment = VerticalAlignment.Center;
+            _btnCopyAccountId.IsEnabled = false;
+            _btnCopyAccountId.Click += OnCopyAccountIdClick;
+
+            Grid.SetColumn(aidLeft, 0);
+            Grid.SetColumn(_btnCopyAccountId, 1);
+            aidGrid.Children.Add(aidLeft);
+            aidGrid.Children.Add(_btnCopyAccountId);
+            _accountIdCard.Child = aidGrid;
+            _viewScanSection.Children.Add(_accountIdCard);
+
+            // Scope Checklist + Policy Selector (2-column card row)
+            var topCards = new Grid { Margin = new Thickness(0, 0, 0, 8) };
             topCards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.65, GridUnitType.Star) });
-            topCards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+            topCards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
             topCards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.0, GridUnitType.Star) });
 
             var scopeCard = new Border
@@ -1057,7 +1254,7 @@ namespace ClaudeResidualIdCleaner
                 BorderBrush = BrushBorderSubtle,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(14, 10, 14, 10)
+                Padding = new Thickness(12, 8, 12, 8)
             };
             var scopeStack = new StackPanel();
             _lblScopeHeader = new TextBlock
@@ -1065,7 +1262,7 @@ namespace ClaudeResidualIdCleaner
                 Foreground = BrushTextSecondary,
                 FontSize = 11.5,
                 FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 0, 0, 7)
+                Margin = new Thickness(0, 0, 0, 5)
             };
             scopeStack.Children.Add(_lblScopeHeader);
 
@@ -1090,7 +1287,7 @@ namespace ClaudeResidualIdCleaner
                 BorderBrush = BrushBorderSubtle,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(14, 10, 14, 10)
+                Padding = new Thickness(12, 8, 12, 8)
             };
             var policyStack = new StackPanel();
             _lblPolicyHeader = new TextBlock
@@ -1098,15 +1295,15 @@ namespace ClaudeResidualIdCleaner
                 Foreground = BrushTextSecondary,
                 FontSize = 11.5,
                 FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 0, 0, 8)
+                Margin = new Thickness(0, 0, 0, 6)
             };
             policyStack.Children.Add(_lblPolicyHeader);
 
-            _lblPolicyAccountText = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = BrushTextPrimary, FontSize = 12 };
-            _rbAccountData = new RadioButton { IsChecked = true, Content = _lblPolicyAccountText, Margin = new Thickness(0, 2, 0, 10) };
+            _lblPolicyAccountText = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = BrushTextPrimary, FontSize = 11.5 };
+            _rbAccountData = new RadioButton { IsChecked = true, Content = _lblPolicyAccountText, Margin = new Thickness(0, 2, 0, 8) };
             _rbAccountData.Checked += OnPolicyRadioChanged;
 
-            _lblPolicyFullText = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = BrushTextPrimary, FontSize = 12 };
+            _lblPolicyFullText = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = BrushTextPrimary, FontSize = 11.5 };
             _rbFullRemoval = new RadioButton { IsChecked = false, Content = _lblPolicyFullText, Margin = new Thickness(0, 2, 0, 2) };
             _rbFullRemoval.Checked += OnPolicyRadioChanged;
 
@@ -1116,10 +1313,135 @@ namespace ClaudeResidualIdCleaner
             Grid.SetColumn(policyCard, 2);
             topCards.Children.Add(policyCard);
 
-            Grid.SetRow(topCards, 1);
-            wsGrid.Children.Add(topCards);
+            _viewScanSection.Children.Add(topCards);
+            topViewHost.Children.Add(_viewScanSection);
 
-            // 2. Action Toolbar
+            // --- TAB 1: Plan Preview Dedicated View Card ---
+            _viewPlanCard = new Border
+            {
+                Background = BrushBgCard,
+                BorderBrush = BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(14, 12, 14, 12),
+                Margin = new Thickness(0, 0, 0, 8),
+                Visibility = Visibility.Collapsed
+            };
+            var planStack = new StackPanel();
+            _lblPlanViewTitle = new TextBlock { Foreground = BrushTextPrimary, FontSize = 14, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) };
+            _lblPlanViewSub = new TextBlock { Foreground = BrushTextSecondary, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+            var shaRow = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            shaRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            shaRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            _lblPlanShaLabel = new TextBlock { Foreground = BrushTextSecondary, FontSize = 12, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) };
+            _txtPlanShaValue = new TextBox
+            {
+                IsReadOnly = true,
+                Background = BrushBgLog,
+                Foreground = BrushAccentBright,
+                BorderBrush = BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(8, 5, 8, 5),
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 12
+            };
+            Grid.SetColumn(_lblPlanShaLabel, 0);
+            Grid.SetColumn(_txtPlanShaValue, 1);
+            shaRow.Children.Add(_lblPlanShaLabel);
+            shaRow.Children.Add(_txtPlanShaValue);
+
+            var planBtns = new WrapPanel { Orientation = Orientation.Horizontal };
+            _btnPlanViewGenerate = CreateActionButton(BrushTealAction, CreateBrush(20, 184, 166), Brushes.White);
+            _btnPlanViewGenerate.Click += OnPlanClick;
+            _btnPlanViewSwitchAccount = CreateActionButton(BrushBgElevated, BrushBorderSubtle, BrushTextPrimary);
+            _btnPlanViewSwitchAccount.Click += OnPresetAccountClick;
+            _btnPlanViewSwitchFull = CreateActionButton(BrushBgElevated, BrushBorderSubtle, BrushTextPrimary);
+            _btnPlanViewSwitchFull.Click += OnPresetFullClick;
+            planBtns.Children.Add(_btnPlanViewGenerate);
+            planBtns.Children.Add(_btnPlanViewSwitchAccount);
+            planBtns.Children.Add(_btnPlanViewSwitchFull);
+
+            planStack.Children.Add(_lblPlanViewTitle);
+            planStack.Children.Add(_lblPlanViewSub);
+            planStack.Children.Add(shaRow);
+            planStack.Children.Add(planBtns);
+            _viewPlanCard.Child = planStack;
+            topViewHost.Children.Add(_viewPlanCard);
+
+            // --- TAB 2: Safe Cleanup Dedicated Execution Gate Card ---
+            _viewCleanCard = new Border
+            {
+                Background = BrushBgCard,
+                BorderBrush = BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(14, 12, 14, 12),
+                Margin = new Thickness(0, 0, 0, 8),
+                Visibility = Visibility.Collapsed
+            };
+            var cleanStack = new StackPanel();
+            _lblCleanViewTitle = new TextBlock { Foreground = BrushTextPrimary, FontSize = 14, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) };
+            _lblCleanViewSub = new TextBlock { Foreground = BrushTextSecondary, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+            _cleanGateBadge = new Border
+            {
+                Background = BrushBgLog,
+                BorderBrush = BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            _lblCleanGateStatus = new TextBlock { Foreground = BrushBadgeReadyFg, FontSize = 12, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+            _cleanGateBadge.Child = _lblCleanGateStatus;
+            _btnCleanViewExecute = CreateActionButton(BrushDangerAction, CreateBrush(239, 68, 68), Brushes.White);
+            _btnCleanViewExecute.IsEnabled = false;
+            _btnCleanViewExecute.HorizontalAlignment = HorizontalAlignment.Left;
+            _btnCleanViewExecute.Click += OnCleanClick;
+
+            cleanStack.Children.Add(_lblCleanViewTitle);
+            cleanStack.Children.Add(_lblCleanViewSub);
+            cleanStack.Children.Add(_cleanGateBadge);
+            cleanStack.Children.Add(_btnCleanViewExecute);
+            _viewCleanCard.Child = cleanStack;
+            topViewHost.Children.Add(_viewCleanCard);
+
+            // --- TAB 3: Verify & Reports Dedicated Card ---
+            _viewVerifyCard = new Border
+            {
+                Background = BrushBgCard,
+                BorderBrush = BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(14, 12, 14, 12),
+                Margin = new Thickness(0, 0, 0, 8),
+                Visibility = Visibility.Collapsed
+            };
+            var verStack = new StackPanel();
+            _lblVerifyViewTitle = new TextBlock { Foreground = BrushTextPrimary, FontSize = 14, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 4) };
+            _lblVerifyViewSub = new TextBlock { Foreground = BrushTextSecondary, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+            _lblVerifySummary = new TextBlock { Foreground = BrushBadgeReadOnlyFg, FontSize = 12, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) };
+            var verBtns = new WrapPanel { Orientation = Orientation.Horizontal };
+            _btnVerifyViewRun = CreateActionButton(BrushAccent, BrushAccentBright, Brushes.White);
+            _btnVerifyViewRun.Click += OnVerifyClick;
+            _btnVerifyViewExport = CreateActionButton(BrushBgElevated, BrushBorderSubtle, BrushTextPrimary);
+            _btnVerifyViewExport.Click += OnExportSummaryClick;
+            _btnVerifyViewFolder = CreateActionButton(BrushBgElevated, BrushBorderSubtle, BrushTextPrimary);
+            _btnVerifyViewFolder.Click += OnOpenFolderClick;
+            verBtns.Children.Add(_btnVerifyViewRun);
+            verBtns.Children.Add(_btnVerifyViewExport);
+            verBtns.Children.Add(_btnVerifyViewFolder);
+
+            verStack.Children.Add(_lblVerifyViewTitle);
+            verStack.Children.Add(_lblVerifyViewSub);
+            verStack.Children.Add(_lblVerifySummary);
+            verStack.Children.Add(verBtns);
+            _viewVerifyCard.Child = verStack;
+            topViewHost.Children.Add(_viewVerifyCard);
+
+            Grid.SetRow(topViewHost, 0);
+            wsGrid.Children.Add(topViewHost);
+
+            // 1. Action Toolbar + Quick Preset Bar
             var toolbarBorder = new Border
             {
                 Background = BrushBgCard,
@@ -1127,8 +1449,10 @@ namespace ClaudeResidualIdCleaner
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(10, 7, 10, 7),
-                Margin = new Thickness(0, 0, 0, 10)
+                Margin = new Thickness(0, 0, 0, 8)
             };
+            var toolbarStack = new StackPanel { Orientation = Orientation.Vertical };
+
             var toolbarGrid = new Grid();
             toolbarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             toolbarGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -1170,11 +1494,42 @@ namespace ClaudeResidualIdCleaner
             Grid.SetColumn(utilActions, 1);
             toolbarGrid.Children.Add(mainActions);
             toolbarGrid.Children.Add(utilActions);
-            toolbarBorder.Child = toolbarGrid;
-            Grid.SetRow(toolbarBorder, 2);
+
+            var presetRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 6, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            _lblPresetLabel = new TextBlock
+            {
+                Foreground = BrushTextSecondary,
+                FontSize = 11.5,
+                FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(2, 0, 8, 0)
+            };
+            _btnPresetAccount = CreateActionButton(BrushSafetyBg, BrushSafetyBorder, BrushSafetyFg);
+            _btnPresetAccount.Padding = new Thickness(10, 4, 10, 4);
+            _btnPresetAccount.FontSize = 11.5;
+            _btnPresetAccount.Click += OnPresetAccountClick;
+
+            _btnPresetFull = CreateActionButton(BrushBgElevated, BrushBorderSubtle, BrushTextPrimary);
+            _btnPresetFull.Padding = new Thickness(10, 4, 10, 4);
+            _btnPresetFull.FontSize = 11.5;
+            _btnPresetFull.Click += OnPresetFullClick;
+
+            presetRow.Children.Add(_lblPresetLabel);
+            presetRow.Children.Add(_btnPresetAccount);
+            presetRow.Children.Add(_btnPresetFull);
+
+            toolbarStack.Children.Add(toolbarGrid);
+            toolbarStack.Children.Add(presetRow);
+            toolbarBorder.Child = toolbarStack;
+            Grid.SetRow(toolbarBorder, 1);
             wsGrid.Children.Add(toolbarBorder);
 
-            // 3. Styled Multi-Column DataGrid inside Card Container
+            // 2. Styled Horizontal-Scrollable Multi-Column DataGrid inside Card Container
             var gridContainer = new Border
             {
                 Background = BrushBgCard,
@@ -1191,26 +1546,59 @@ namespace ClaudeResidualIdCleaner
                 AutoGenerateColumns = false,
                 CanUserAddRows = false,
                 CanUserDeleteRows = false,
+                CanUserResizeColumns = true,
                 IsReadOnly = false,
                 HeadersVisibility = DataGridHeadersVisibility.Column,
                 GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 ItemsSource = _visibleRows
             };
 
-            var ellipsisTextStyle = new Style(typeof(TextBlock));
-            ellipsisTextStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis));
+            _chkSelectAll = new CheckBox
+            {
+                IsChecked = false,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = BrushTextSecondary
+            };
+            _chkSelectAll.Click += OnSelectAllHeaderClick;
 
             var selectBinding = new Binding("Selected") { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged };
-            _colSelect = new DataGridCheckBoxColumn { Binding = selectBinding, Width = 70 };
-            _colCategory = new DataGridTextColumn { Binding = new Binding("Category"), IsReadOnly = true, Width = 148, ElementStyle = ellipsisTextStyle };
-            _colPath = new DataGridTextColumn { Binding = new Binding("PathOrPackage"), IsReadOnly = true, Width = new DataGridLength(1.45, DataGridLengthUnitType.Star), ElementStyle = ellipsisTextStyle };
+            _colSelect = new DataGridCheckBoxColumn { Binding = selectBinding, Header = _chkSelectAll, Width = 114, MinWidth = 108 };
+
+            _colCategory = new DataGridTextColumn
+            {
+                Binding = new Binding("Category"),
+                IsReadOnly = true,
+                Width = 155,
+                MinWidth = 140,
+                ElementStyle = CreateCellTextStyle("Category")
+            };
+            _colPath = new DataGridTextColumn
+            {
+                Binding = new Binding("PathOrPackage"),
+                IsReadOnly = true,
+                Width = 480,
+                MinWidth = 360,
+                ElementStyle = CreateCellTextStyle("PathOrPackage")
+            };
             _colStatus = new DataGridTemplateColumn
             {
-                Width = 156,
+                Width = 190,
+                MinWidth = 175,
                 IsReadOnly = true,
                 CellTemplate = (DataTemplate)Resources["StatusBadgeTemplate"]
             };
-            _colDetails = new DataGridTextColumn { Binding = new Binding("Details"), IsReadOnly = true, Width = new DataGridLength(1.25, DataGridLengthUnitType.Star), ElementStyle = ellipsisTextStyle };
+            _colDetails = new DataGridTextColumn
+            {
+                Binding = new Binding("Details"),
+                IsReadOnly = true,
+                Width = 520,
+                MinWidth = 420,
+                ElementStyle = CreateCellTextStyle("Details")
+            };
 
             _gridResults.Columns.Add(_colSelect);
             _gridResults.Columns.Add(_colCategory);
@@ -1231,22 +1619,38 @@ namespace ClaudeResidualIdCleaner
             gridOverlayContainer.Children.Add(_gridResults);
             gridOverlayContainer.Children.Add(_lblGridEmptyHint);
             gridContainer.Child = gridOverlayContainer;
-            Grid.SetRow(gridContainer, 3);
+            Grid.SetRow(gridContainer, 2);
             wsGrid.Children.Add(gridContainer);
 
-            // 4. Collapsible Live Log Drawer
+            // 3. Horizontal GridSplitter between DataGrid and Live Log Drawer
+            _logSplitter = new GridSplitter
+            {
+                Height = 6,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center,
+                ResizeDirection = GridResizeDirection.Rows,
+                ResizeBehavior = GridResizeBehavior.PreviousAndNext,
+                Background = BrushBorderSubtle,
+                Margin = new Thickness(0, 4, 0, 4),
+                ShowsPreview = true,
+                Cursor = Cursors.SizeNS
+            };
+            Grid.SetRow(_logSplitter, 3);
+            wsGrid.Children.Add(_logSplitter);
+
+            // 4. Collapsible & Resizable Live Log Drawer
             _logDrawerPanel = new Border
             {
                 Background = BrushBgChrome,
                 BorderBrush = BrushBorderSubtle,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
-                Margin = new Thickness(0, 10, 0, 0),
+                Margin = new Thickness(0, 2, 0, 0),
                 Padding = new Thickness(10, 8, 10, 8)
             };
             var logGrid = new Grid();
             logGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            logGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(78) });
+            logGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
             _lblLogDrawerTitle = new TextBlock
             {
@@ -1282,6 +1686,14 @@ namespace ClaudeResidualIdCleaner
             return wsGrid;
         }
 
+        private static Style CreateCellTextStyle(string propertyName)
+        {
+            var style = new Style(typeof(TextBlock));
+            style.Setters.Add(new Setter(TextBlock.ToolTipProperty, new Binding(propertyName)));
+            style.Setters.Add(new Setter(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center));
+            return style;
+        }
+
         private Border CreateMetricCard(out TextBlock lblTitle, out TextBlock lblValue, out TextBlock lblSub, Brush valueBrush)
         {
             var card = new Border
@@ -1290,7 +1702,7 @@ namespace ClaudeResidualIdCleaner
                 BorderBrush = BrushBorderSubtle,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(14, 11, 14, 11)
+                Padding = new Thickness(12, 8, 12, 8)
             };
             var stack = new StackPanel();
             lblTitle = new TextBlock
@@ -1501,8 +1913,13 @@ namespace ClaudeResidualIdCleaner
             {
                 _aboutPanel.Visibility = Visibility.Collapsed;
                 _workspacePanel.Visibility = Visibility.Visible;
+                _viewScanSection.Visibility = (index == 0) ? Visibility.Visible : Visibility.Collapsed;
+                _viewPlanCard.Visibility = (index == 1) ? Visibility.Visible : Visibility.Collapsed;
+                _viewCleanCard.Visibility = (index == 2) ? Visibility.Visible : Visibility.Collapsed;
+                _viewVerifyCard.Visibility = (index == 3) ? Visibility.Visible : Visibility.Collapsed;
             }
 
+            UpdatePlanCleanVerifyCards();
             UpdateContextBanner();
         }
 
@@ -1523,13 +1940,37 @@ namespace ClaudeResidualIdCleaner
 
         private void UpdateLogDrawerVisibility()
         {
-            _logDrawerPanel.Visibility = _logsExpanded ? Visibility.Visible : Visibility.Collapsed;
+            if (_logsExpanded)
+            {
+                double maxAllowed = ActualHeight > 200 ? Math.Max(110.0, Math.Floor(ActualHeight * 0.60)) : 480.0;
+                _logDrawerRow.MinHeight = 80;
+                _logDrawerRow.MaxHeight = maxAllowed;
+                _logDrawerRow.Height = new GridLength(_lastLogHeight >= 80 ? _lastLogHeight : 115);
+                _logSplitter.Visibility = Visibility.Visible;
+                _logDrawerPanel.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                if (_logDrawerPanel.ActualHeight >= 80)
+                {
+                    _lastLogHeight = _logDrawerPanel.ActualHeight;
+                }
+                _logDrawerRow.MinHeight = 0;
+                _logDrawerRow.Height = new GridLength(0);
+                _logSplitter.Visibility = Visibility.Collapsed;
+                _logDrawerPanel.Visibility = Visibility.Collapsed;
+            }
         }
 
         private void OnToggleLogsClick(object sender, RoutedEventArgs e)
         {
             _logsExpanded = !_logsExpanded;
             UpdateLogDrawerVisibility();
+        }
+
+        private string GetActivePolicy()
+        {
+            return (_rbFullRemoval != null && _rbFullRemoval.IsChecked == true) ? "FullRemoval" : "AccountData";
         }
 
         private void OnPolicyPillClick(object sender, RoutedEventArgs e)
@@ -1547,6 +1988,9 @@ namespace ClaudeResidualIdCleaner
         private void OnPolicyRadioChanged(object sender, RoutedEventArgs e)
         {
             UpdatePolicyPillText();
+            var s = Localization.GetStrings(_lang);
+            RelocalizeExistingRows(s);
+            UpdatePlanCleanVerifyCards();
         }
 
         private void UpdatePolicyPillText()
@@ -1557,6 +2001,160 @@ namespace ClaudeResidualIdCleaner
                 ? s["PolicyFullShort"]
                 : s["PolicyAccountShort"];
             _btnPolicyPill.Content = s["PolicyPillPrefix"] + policyName;
+        }
+
+        private void OnPresetAccountClick(object sender, RoutedEventArgs e)
+        {
+            ApplySelectionPreset("AccountData");
+        }
+
+        private void OnPresetFullClick(object sender, RoutedEventArgs e)
+        {
+            ApplySelectionPreset("FullRemoval");
+        }
+
+        private void ApplySelectionPreset(string policyName)
+        {
+            bool isFull = string.Equals(policyName, "FullRemoval", StringComparison.OrdinalIgnoreCase);
+            if (_chkCli != null) _chkCli.IsChecked = true;
+            if (_chkDesktop != null) _chkDesktop.IsChecked = true;
+            if (_chkVsCode != null) _chkVsCode.IsChecked = true;
+            if (_chkCred != null) _chkCred.IsChecked = true;
+            if (_chkEnv != null) _chkEnv.IsChecked = true;
+
+            if (isFull) _rbFullRemoval.IsChecked = true;
+            else _rbAccountData.IsChecked = true;
+
+            for (int i = 0; i < _allRows.Count; i++)
+            {
+                ResidualGridRow r = _allRows[i];
+                if (!r.CanSelect)
+                {
+                    r.Selected = false;
+                    continue;
+                }
+                if (isFull)
+                {
+                    r.Selected = true;
+                }
+                else
+                {
+                    r.Selected = string.Equals(r.Policy, "AccountData", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            RelocalizeExistingRows(Localization.GetStrings(_lang));
+            RefreshVisibleRows();
+            UpdateMetricCards();
+            SyncSelectAllCheckbox();
+            UpdatePlanCleanVerifyCards();
+        }
+
+        private void OnSelectAllHeaderClick(object sender, RoutedEventArgs e)
+        {
+            if (_suppressSelectAllSync || _chkSelectAll == null) return;
+            bool targetChecked = (_chkSelectAll.IsChecked == true);
+            for (int i = 0; i < _visibleRows.Count; i++)
+            {
+                if (_visibleRows[i].CanSelect)
+                {
+                    _visibleRows[i].Selected = targetChecked;
+                }
+            }
+        }
+
+        private void SyncSelectAllCheckbox()
+        {
+            if (_chkSelectAll == null) return;
+            _suppressSelectAllSync = true;
+            try
+            {
+                int selectable = 0;
+                int selected = 0;
+                for (int i = 0; i < _visibleRows.Count; i++)
+                {
+                    if (_visibleRows[i].CanSelect)
+                    {
+                        selectable++;
+                        if (_visibleRows[i].Selected) selected++;
+                    }
+                }
+                _chkSelectAll.IsChecked = (selectable > 0 && selected == selectable);
+            }
+            finally
+            {
+                _suppressSelectAllSync = false;
+            }
+        }
+
+        private void UpdateAccountIdCard()
+        {
+            if (_txtAccountIdValue == null) return;
+            var s = Localization.GetStrings(_lang);
+            if (_accountIdRecords.Count == 0)
+            {
+                _txtAccountIdValue.Text = s["AccountIdEmpty"];
+                _btnCopyAccountId.IsEnabled = false;
+                return;
+            }
+            var parts = new List<string>();
+            for (int i = 0; i < _accountIdRecords.Count; i++)
+            {
+                ResidualAccountIdRecord rec = _accountIdRecords[i];
+                parts.Add(string.Format("[{0}] {1}: {2}", rec.Source, rec.Field, rec.Value));
+            }
+            _txtAccountIdValue.Text = string.Join("   |   ", parts.ToArray());
+            _btnCopyAccountId.IsEnabled = true;
+        }
+
+        private void OnCopyAccountIdClick(object sender, RoutedEventArgs e)
+        {
+            if (_accountIdRecords.Count == 0) return;
+            var lines = new List<string>();
+            for (int i = 0; i < _accountIdRecords.Count; i++)
+            {
+                ResidualAccountIdRecord rec = _accountIdRecords[i];
+                lines.Add(string.Format("{0} | {1} | {2} = {3}", rec.Source, rec.IdType, rec.Field, rec.Value));
+            }
+            Clipboard.SetText(string.Join("\r\n", lines.ToArray()));
+            var s = Localization.GetStrings(_lang);
+            _lblStatusBar.Text = s["CopiedAccountIdMsg"];
+            AppendLog("[INFO] Copied non-secret residual Account/Device IDs to clipboard.");
+        }
+
+        private void UpdatePlanCleanVerifyCards()
+        {
+            if (_txtPlanShaValue == null) return;
+            var s = Localization.GetStrings(_lang);
+            string policy = GetActivePolicy();
+            bool armed = _hasScanned && _hasPlan && _readyCount > 0 && !string.IsNullOrEmpty(_planSha256);
+
+            _txtPlanShaValue.Text = string.IsNullOrEmpty(_planSha256) ? s["PlanShaNone"] : _planSha256;
+            _btnClean.IsEnabled = armed;
+            if (_btnCleanViewExecute != null)
+            {
+                _btnCleanViewExecute.IsEnabled = armed;
+            }
+            if (_lblCleanGateStatus != null)
+            {
+                if (armed)
+                {
+                    string shortSha = _planSha256.Length >= 12 ? _planSha256.Substring(0, 12) : _planSha256;
+                    _lblCleanGateStatus.Text = string.Format(s["CleanGateReady"], _readyCount, policy, shortSha);
+                    _lblCleanGateStatus.Foreground = BrushSafetyFg;
+                }
+                else
+                {
+                    _lblCleanGateStatus.Text = s["CleanGateLocked"];
+                    _lblCleanGateStatus.Foreground = BrushBadgeReadyFg;
+                }
+            }
+            if (_lblVerifySummary != null)
+            {
+                _lblVerifySummary.Text = string.IsNullOrEmpty(_lastVerifySummaryText)
+                    ? s["VerifySummaryNone"]
+                    : _lastVerifySummaryText;
+            }
         }
 
         public void ToggleLanguage()
@@ -1605,6 +2203,10 @@ namespace ClaudeResidualIdCleaner
             _lblMetricSafetyValue.Text = s["MetricSafetyValue"];
             _lblMetricSafetySub.Text = s["MetricSafetySub"];
 
+            _lblAccountIdCardTitle.Text = s["AccountIdCardTitle"];
+            _lblAccountIdCardSub.Text = s["AccountIdCardSub"];
+            _btnCopyAccountId.Content = s["BtnCopyAccountId"];
+
             _lblScopeHeader.Text = s["ScopeHeader"];
             _chkCli.Content = s["ChkCli"];
             _chkDesktop.Content = s["ChkDesktop"];
@@ -1616,6 +2218,23 @@ namespace ClaudeResidualIdCleaner
             _lblPolicyAccountText.Text = s["PolicyAccount"];
             _lblPolicyFullText.Text = s["PolicyFull"];
 
+            _lblPlanViewTitle.Text = s["PlanViewTitle"];
+            _lblPlanViewSub.Text = s["PlanViewSub"];
+            _lblPlanShaLabel.Text = s["PlanShaLabel"];
+            _btnPlanViewGenerate.Content = s["BtnPlan"];
+            _btnPlanViewSwitchAccount.Content = s["PresetAccountBtn"];
+            _btnPlanViewSwitchFull.Content = s["PresetFullBtn"];
+
+            _lblCleanViewTitle.Text = s["CleanViewTitle"];
+            _lblCleanViewSub.Text = s["CleanViewSub"];
+            _btnCleanViewExecute.Content = s["BtnClean"];
+
+            _lblVerifyViewTitle.Text = s["VerifyViewTitle"];
+            _lblVerifyViewSub.Text = s["VerifyViewSub"];
+            _btnVerifyViewRun.Content = s["BtnVerify"];
+            _btnVerifyViewExport.Content = s["BtnExportSummary"];
+            _btnVerifyViewFolder.Content = s["BtnOpenFolder"];
+
             _btnScan.Content = s["BtnScan"];
             _btnPlan.Content = s["BtnPlan"];
             _btnClean.Content = s["BtnClean"];
@@ -1624,7 +2243,11 @@ namespace ClaudeResidualIdCleaner
             _btnExportSummary.Content = s["BtnExportSummary"];
             _btnToggleLogs.Content = s["BtnToggleLogs"];
 
-            _colSelect.Header = s["ColSelect"];
+            _lblPresetLabel.Text = s["PresetLabel"];
+            _btnPresetAccount.Content = s["PresetAccountBtn"];
+            _btnPresetFull.Content = s["PresetFullBtn"];
+            _chkSelectAll.Content = s["ColSelect"];
+
             _colCategory.Header = s["ColCategory"];
             _colPath.Header = s["ColPath"];
             _colStatus.Header = s["ColStatus"];
@@ -1647,6 +2270,8 @@ namespace ClaudeResidualIdCleaner
             _lblFooterBoundary.Text = s["FooterBoundary"];
 
             RelocalizeExistingRows(s);
+            UpdateAccountIdCard();
+            UpdatePlanCleanVerifyCards();
             UpdateContextBanner();
 
             if (!_hasScanned)
@@ -1661,13 +2286,30 @@ namespace ClaudeResidualIdCleaner
 
         private void RelocalizeExistingRows(Dictionary<string, string> s)
         {
+            string activePolicy = GetActivePolicy();
             for (int i = 0; i < _allRows.Count; i++)
             {
                 ResidualGridRow r = _allRows[i];
-                if (r.StatusTone == "Ready") r.Status = s["FoundLabel"];
-                else if (r.StatusTone == "ReadOnly") r.Status = s["ReadOnlyLabel"];
-                else if (r.StatusTone == "Clean") r.Status = s["CleanLabel"];
-                else r.Status = s["ProtectedLabel"];
+                if (string.Equals(r.Decision, "Ready", StringComparison.OrdinalIgnoreCase))
+                {
+                    bool inScope = string.Equals(activePolicy, "FullRemoval", StringComparison.OrdinalIgnoreCase) ||
+                                   string.Equals(r.Policy, "AccountData", StringComparison.OrdinalIgnoreCase);
+                    r.StatusTone = inScope ? "Ready" : "Excluded";
+                    r.Status = inScope ? s["FoundLabel"] : s["ExcludedLabel"];
+                }
+                else if (r.StatusTone == "ReadOnly")
+                {
+                    r.Status = s["ReadOnlyLabel"];
+                }
+                else if (r.StatusTone == "Clean")
+                {
+                    r.Status = s["CleanLabel"];
+                }
+                else
+                {
+                    r.StatusTone = "Protected";
+                    r.Status = s["ProtectedLabel"];
+                }
             }
         }
 
@@ -1675,18 +2317,44 @@ namespace ClaudeResidualIdCleaner
         {
             var s = Localization.GetStrings(_lang);
             _allRows.Clear();
+            _accountIdRecords.Clear();
+
+            _accountIdRecords.Add(new ResidualAccountIdRecord
+            {
+                Source = "Claude Code CLI",
+                IdType = "AccountUuid",
+                Field = "accountUuid",
+                Value = "a1b2c3d4-0000-4000-8000-000000000001",
+                ConfigPath = @"C:\Users\<USERNAME>\.claude.json"
+            });
+            _accountIdRecords.Add(new ResidualAccountIdRecord
+            {
+                Source = "Claude Code CLI",
+                IdType = "OrganizationUuid",
+                Field = "organizationUuid",
+                Value = "b2c3d4e5-0000-4000-8000-000000000002",
+                ConfigPath = @"C:\Users\<USERNAME>\.claude.json"
+            });
+            _accountIdRecords.Add(new ResidualAccountIdRecord
+            {
+                Source = "Claude Desktop",
+                IdType = "DeviceId",
+                Field = "anonymousId",
+                Value = "dev-claude-0000-4000-8000-000000000003",
+                ConfigPath = @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Preferences"
+            });
 
             AddDemoRow(true, true, "ClaudeCode", "AccountData", "cli-credentials", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude\.credentials.json", s["FoundLabel"], "Ready", "Ready", "[AccountData] Confirmed Claude auth credentials cache", 18432);
-            AddDemoRow(false, false, "ClaudeCode", "FullRemoval", "cli-user-json", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude.json", s["ProtectedLabel"], "Protected", "ReviewOnly", "[AccountData] Preserved by AccountData; ReviewOnly under FullRemoval", 42190);
-            AddDemoRow(true, true, "ClaudeCode", "FullRemoval", "npm-claude-code", "NpmPackage", "npm Global Package", @"C:\Users\<USERNAME>\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code", s["FoundLabel"], "Ready", "Ready", "[FullRemoval] @anthropic-ai/claude-code package residue", 38450120);
+            AddDemoRow(false, false, "ClaudeCode", "FullRemoval", "cli-user-json", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude.json", s["ProtectedLabel"], "Protected", "ReviewOnly", "[AccountData] Preserved by AccountData; ReviewOnly under FullRemoval (contains accountUuid metadata)", 42190);
+            AddDemoRow(false, true, "ClaudeCode", "FullRemoval", "npm-claude-code", "NpmPackage", "npm Global Package", @"C:\Users\<USERNAME>\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] @anthropic-ai/claude-code package residue (requires FullRemoval policy)", 38450120);
 
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-cache", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Cache", s["FoundLabel"], "Ready", "Ready", "[AccountData] Electron GPU/HTTP cache directory", 124620800);
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-network", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Network", s["FoundLabel"], "Ready", "Ready", "[AccountData] Session cookies & network state", 2450112);
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-logs", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Local\Claude\logs", s["FoundLabel"], "Ready", "Ready", "[AccountData] Desktop diagnostic log files", 845312);
             AddDemoRow(false, false, "ClaudeDesktop", "AccountData", "desktop-local-storage", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Local Storage", s["ProtectedLabel"], "Protected", "ReviewOnly", "[AccountData] Protected mixed storage (preserved by default)", 15820000);
 
-            AddDemoRow(true, true, "VsCodeExtensions", "FullRemoval", "vscode-ext", "VsCodeExtension", "VS Code Extension", @"C:\Users\<USERNAME>\.vscode\extensions\anthropic.claude-code-2.1.40", s["FoundLabel"], "Ready", "Ready", "[FullRemoval] anthropic.claude-code extension cache", 48210400);
-            AddDemoRow(true, true, "VsCodeExtensions", "FullRemoval", "chrome-native-host", "RegistryKey", "Browser Native Host", @"HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension", s["FoundLabel"], "Ready", "Ready", "[FullRemoval] Exact HKCU Chrome NativeMessagingHosts key", 0);
+            AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "vscode-ext", "VsCodeExtension", "VS Code Extension", @"C:\Users\<USERNAME>\.vscode\extensions\anthropic.claude-code-2.1.40", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] anthropic.claude-code extension cache (requires FullRemoval policy)", 48210400);
+            AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "chrome-native-host", "RegistryKey", "Browser Native Host", @"HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] Exact HKCU Chrome NativeMessagingHosts key (requires FullRemoval policy)", 0);
 
             AddDemoRow(false, false, "CredentialManager", "ReadOnly", "cred-manager", "CredentialManager", "Credential Manager", "Claude* targets (count: 2)", s["ReadOnlyLabel"], "ReadOnly", "ReadOnly", "Credential Manager Claude* target count: 2 (secret values never read)", 0);
             AddDemoRow(false, false, "EnvironmentVars", "ReadOnly", "env-0", "EnvVar", "Env (User)", "ANTHROPIC_API_KEY", s["ReadOnlyLabel"], "ReadOnly", "ReadOnly", "Environment variable name only (secret value never read)", 0);
@@ -1698,9 +2366,11 @@ namespace ClaudeResidualIdCleaner
             _btnClean.IsEnabled = false;
             RefreshVisibleRows();
             UpdateMetricCards();
+            UpdateAccountIdCard();
+            SyncSelectAllCheckbox();
 
-            AppendLog("[DEMO] Populated sanitized mock audit inventory (12 entries; zero host disk access).");
-            AppendLog("[DEMO] Ready targets: 7 | Protected/ReviewOnly: 2 | Read-Only Audit: 3.");
+            AppendLog("[DEMO] Populated sanitized mock audit inventory (12 entries; 3 non-secret UUIDs detected).");
+            AppendLog("[DEMO] Ready (AccountData): 4 | Scope Excluded (FullRemoval): 3 | Protected: 2 | Read-Only: 3.");
             AppendLog("[DEMO] Clean button remains locked until a verified SHA-256 plan is generated.");
         }
 
@@ -1790,7 +2460,11 @@ namespace ClaudeResidualIdCleaner
                 DryRun = _dryRun,
                 NavTabCount = _navButtons.Count,
                 MetricCardCount = _metricCards.Count,
-                ThemeStyle = "AdobeDarkSlate"
+                ThemeStyle = "AdobeDarkSlate",
+                HasGridSplitter = (_logSplitter != null),
+                HasAccountIdCard = (_accountIdCard != null && _btnCopyAccountId != null),
+                HorizontalScrollEnabled = (_gridResults != null && _gridResults.HorizontalScrollBarVisibility == ScrollBarVisibility.Auto),
+                AccountIdCount = _accountIdRecords.Count
             };
         }
 
@@ -2058,7 +2732,9 @@ namespace ClaudeResidualIdCleaner
 
                 var doc = ParseJsonObject(res.StdOut);
                 _allRows.Clear();
+                _accountIdRecords.Clear();
                 int activeCount = 0;
+                string activePolicy = GetActivePolicy();
 
                 object invObj;
                 if (doc.TryGetValue("Inventory", out invObj) && invObj is ArrayList)
@@ -2077,11 +2753,18 @@ namespace ClaudeResidualIdCleaner
                         string reason = GetDictString(item, "Reason");
                         long sizeBytes = GetDictLong(item, "SizeBytes");
                         bool ready = string.Equals(decision, "Ready", StringComparison.OrdinalIgnoreCase);
+                        bool inPolicy = string.Equals(activePolicy, "FullRemoval", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(policy, "AccountData", StringComparison.OrdinalIgnoreCase);
                         if (ready) activeCount++;
+
+                        string tone = ready ? (inPolicy ? "Ready" : "Excluded") : "Protected";
+                        string statusLabel = ready
+                            ? (inPolicy ? s["FoundLabel"] : s["ExcludedLabel"])
+                            : s["ProtectedLabel"];
 
                         _allRows.Add(new ResidualGridRow
                         {
-                            Selected = ready,
+                            Selected = (ready && inPolicy),
                             CanSelect = ready,
                             ScopeKey = ClassifyScope(id, cat, path),
                             Policy = policy,
@@ -2089,8 +2772,8 @@ namespace ClaudeResidualIdCleaner
                             Kind = kind,
                             Category = cat,
                             PathOrPackage = path,
-                            Status = ready ? s["FoundLabel"] : s["ProtectedLabel"],
-                            StatusTone = ready ? "Ready" : "Protected",
+                            Status = statusLabel,
+                            StatusTone = tone,
                             Decision = decision,
                             Details = string.Format("[{0}] {1}", policy, reason),
                             SizeBytes = sizeBytes
@@ -2102,6 +2785,25 @@ namespace ClaudeResidualIdCleaner
                 if (doc.TryGetValue("Summary", out sumObj) && sumObj is Dictionary<string, object>)
                 {
                     var sumDict = (Dictionary<string, object>)sumObj;
+                    object idsObj;
+                    if (sumDict.TryGetValue("ResidualAccountIds", out idsObj) && idsObj is ArrayList)
+                    {
+                        var idList = (ArrayList)idsObj;
+                        for (int i = 0; i < idList.Count; i++)
+                        {
+                            var rec = idList[i] as Dictionary<string, object>;
+                            if (rec == null) continue;
+                            _accountIdRecords.Add(new ResidualAccountIdRecord
+                            {
+                                Source = GetDictString(rec, "Source"),
+                                IdType = GetDictString(rec, "IdType"),
+                                Field = GetDictString(rec, "Field"),
+                                Value = GetDictString(rec, "Value"),
+                                ConfigPath = GetDictString(rec, "ConfigPath")
+                            });
+                        }
+                    }
+
                     object envObj;
                     if (sumDict.TryGetValue("EnvironmentVariableNames", out envObj) && envObj is ArrayList)
                     {
@@ -2168,8 +2870,11 @@ namespace ClaudeResidualIdCleaner
                 _planSha256 = string.Empty;
                 RefreshVisibleRows();
                 UpdateMetricCards();
+                UpdateAccountIdCard();
+                SyncSelectAllCheckbox();
+                UpdatePlanCleanVerifyCards();
                 _lblStatusBar.Text = string.Format(s["StatusScanned"], _allRows.Count, activeCount);
-                AppendLog(string.Format("Scan finished: {0} total entries inspected.", _allRows.Count));
+                AppendLog(string.Format("Scan finished: {0} total entries inspected; {1} non-secret Account/Device IDs found.", _allRows.Count, _accountIdRecords.Count));
             });
         }
 
@@ -2200,6 +2905,7 @@ namespace ClaudeResidualIdCleaner
                 _hasPlan = !string.IsNullOrEmpty(_planSha256);
 
                 string shortSha = _planSha256.Length >= 12 ? _planSha256.Substring(0, 12) : _planSha256;
+                UpdatePlanCleanVerifyCards();
                 _lblStatusBar.Text = string.Format(s["StatusPlanned"], _readyCount, shortSha);
                 AppendLog(string.Format("CLEANUP-PLAN.md written | Ready={0} | SHA256={1}", _readyCount, _planSha256));
             });
@@ -2274,6 +2980,8 @@ namespace ClaudeResidualIdCleaner
                     }
                     _hasPlan = false;
                     _readyCount = 0;
+                    _planSha256 = string.Empty;
+                    UpdatePlanCleanVerifyCards();
                     AppendLog("Cleanup complete; invoking automatic Verify...");
                     OnVerifyClick(null, null);
                 });
@@ -2319,7 +3027,9 @@ namespace ClaudeResidualIdCleaner
                         currentCount = ((ArrayList)ciObj).Count;
                     }
                 }
-                _lblStatusBar.Text = string.Format(s["StatusVerified"], checkedCount, currentCount);
+                _lastVerifySummaryText = string.Format(s["StatusVerified"], checkedCount, currentCount);
+                UpdatePlanCleanVerifyCards();
+                _lblStatusBar.Text = _lastVerifySummaryText;
                 AppendLog(string.Format("Verify finished: checked={0}, remaining={1}.", checkedCount, currentCount));
             });
         }
@@ -2333,23 +3043,76 @@ namespace ClaudeResidualIdCleaner
         private void OnExportSummaryClick(object sender, RoutedEventArgs e)
         {
             var s = Localization.GetStrings(_lang);
-            if (_demoAudit)
+            if (!_demoAudit && !EnsureBackend()) return;
+
+            var dlg = new SaveFileDialog
             {
-                MessageBox.Show(this, s["DemoPlanNotice"], Title, MessageBoxButton.OK, MessageBoxImage.Information);
+                Title = s["SaveDialogTitle"],
+                Filter = s["SaveDialogFilter"],
+                DefaultExt = ".md",
+                FileName = "AUDIT.md",
+                AddExtension = true
+            };
+            if (!string.IsNullOrEmpty(_toolkitRoot) && Directory.Exists(_toolkitRoot))
+            {
+                dlg.InitialDirectory = _toolkitRoot;
+            }
+            bool? picked = dlg.ShowDialog(this);
+            if (picked != true || string.IsNullOrEmpty(dlg.FileName))
+            {
                 return;
             }
-            if (!EnsureBackend()) return;
-            RunBackendAsync(new string[] { "-Audit", "-Language", _lang, "-SaveAuditReport", "-OutputFormat", "Json" }, delegate(BackendRunResult res)
+
+            string targetPath = Path.GetFullPath(dlg.FileName);
+            if (_demoAudit)
+            {
+                try
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine("# claude-cleanup Demo Audit Report (Sanitized)");
+                    sb.AppendLine();
+                    sb.AppendLine("## Detected Residual Account IDs (Non-Secret Metadata Only)");
+                    for (int i = 0; i < _accountIdRecords.Count; i++)
+                    {
+                        ResidualAccountIdRecord r = _accountIdRecords[i];
+                        sb.AppendLine(string.Format("- {0}: `{1}` = `{2}` (`{3}`)", r.Source, r.Field, r.Value, r.ConfigPath));
+                    }
+                    File.WriteAllText(targetPath, sb.ToString(), new UTF8Encoding(false));
+                    PromptOpenExportedAudit(targetPath, s);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, ex.Message, Title, MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                return;
+            }
+
+            RunBackendAsync(new string[] { "-Audit", "-Language", _lang, "-SaveAuditReport", "-AuditOutputPath", targetPath, "-OutputFormat", "Json" }, delegate(BackendRunResult res)
             {
                 if (res.ExitCode != 0)
                 {
                     MessageBox.Show(this, res.StdErr, Title, MessageBoxButton.OK, MessageBoxImage.Error);
                     return;
                 }
-                string auditPath = Path.Combine(_toolkitRoot, "AUDIT.md");
-                _lblStatusBar.Text = string.Format(s["StatusExported"], auditPath);
-                AppendLog("Exported AUDIT.md: " + auditPath);
+                PromptOpenExportedAudit(targetPath, s);
             });
+        }
+
+        private void PromptOpenExportedAudit(string exportedPath, Dictionary<string, string> s)
+        {
+            _lblStatusBar.Text = string.Format(s["StatusExported"], exportedPath);
+            AppendLog("Exported sanitized AUDIT report: " + exportedPath);
+            MessageBoxResult openChoice = MessageBox.Show(
+                this,
+                string.Format(s["ExportSuccessAskOpen"], exportedPath),
+                s["ExportSuccessTitle"],
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information,
+                MessageBoxResult.Yes);
+            if (openChoice == MessageBoxResult.Yes)
+            {
+                Process.Start(new ProcessStartInfo { FileName = exportedPath, UseShellExecute = true });
+            }
         }
 
         internal static void PumpDispatcher()
@@ -2485,7 +3248,7 @@ namespace ClaudeResidualIdCleaner
                 captureWin.Top = -32000;
                 captureWin.ShowInTaskbar = false;
                 captureWin.Width = 1360;
-                captureWin.Height = 860;
+                captureWin.Height = 920;
                 captureWin.Show();
                 MainWindow.PumpDispatcher();
                 captureWin.UpdateLayout();

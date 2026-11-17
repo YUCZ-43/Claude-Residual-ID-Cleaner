@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ClaudeCleanup.ps1'
 . $scriptPath
 
@@ -587,7 +587,89 @@ try {
 
     $auditJsonObj = Get-StructuredAuditReport | ConvertTo-Json -Depth 10 | ConvertFrom-Json
     $envVarsNoValues = (@($auditJsonObj.Summary.EnvironmentVariableNames | Where-Object { $_.PSObject.Properties['Value'] }).Count -eq 0)
-    Assert-True ($auditJsonObj.SchemaVersion -eq 3 -and $auditJsonObj.Mode -eq 'Audit' -and $null -ne $auditJsonObj.Summary -and $envVarsNoValues) 'structured JSON audit report valid and omits secret env values'
+    $hasResidualProp = ($null -ne $auditJsonObj.Summary.PSObject.Properties['ResidualAccountIds'])
+    Assert-True ($auditJsonObj.SchemaVersion -eq 3 -and $auditJsonObj.Mode -eq 'Audit' -and $null -ne $auditJsonObj.Summary -and $envVarsNoValues -and $hasResidualProp) 'structured JSON audit report valid, exposes ResidualAccountIds, and omits secret env values'
+
+    # Sandboxed non-secret Account/Org/Device UUID extraction (strictly omits OAuth tokens, refresh tokens, session keys, and emails)
+    $acctMockRoot = Join-Path $sandbox 'account-meta-mock'
+    $mockCliDir = Join-Path $acctMockRoot '.claude'
+    $mockDeskDir = Join-Path $acctMockRoot 'AppDataClaude'
+    New-Item -ItemType Directory -Path $mockCliDir, $mockDeskDir -Force | Out-Null
+    $mockCliJson = Join-Path $acctMockRoot '.claude.json'
+    $mockCredJson = Join-Path $mockCliDir '.credentials.json'
+    $mockDeskPref = Join-Path $mockDeskDir 'Preferences'
+    $fakeSecretAccess = ('sk-' + 'ant-' + 'oat01-mock-secret-value-99999')
+    $fakeRefreshVal = 'mock-refresh-secret-value-88888'
+    $fakeSessionVal = ('sk-' + 'ant-' + 'sid01-mock-session-key-77777')
+
+    $cliMockPayload = [ordered]@{
+        userID = 'usr-mock-001122334455'
+        anonymousId = 'anon-mock-device-667788'
+        sessionKey = $fakeSessionVal
+        oauthAccount = [ordered]@{
+            accountUuid = '11111111-2222-4333-8444-555555555555'
+            organizationUuid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+            emailAddress = 'mock-user@example.invalid'
+        }
+        claudeAiOauth = [ordered]@{
+            accessToken = $fakeSecretAccess
+            refreshToken = $fakeRefreshVal
+        }
+    } | ConvertTo-Json -Depth 6
+    [IO.File]::WriteAllText($mockCliJson, $cliMockPayload, (New-Object System.Text.UTF8Encoding($false)))
+
+    $credMockPayload = [ordered]@{
+        claudeAiOauth = [ordered]@{
+            accessToken = $fakeSecretAccess
+            accountUuid = '99999999-9999-4999-8999-999999999999'
+        }
+    } | ConvertTo-Json -Depth 4
+    [IO.File]::WriteAllText($mockCredJson, $credMockPayload, (New-Object System.Text.UTF8Encoding($false)))
+
+    $deskMockPayload = [ordered]@{
+        deviceId = 'desk-dev-mock-445566'
+        authToken = $fakeSecretAccess
+    } | ConvertTo-Json -Depth 4
+    [IO.File]::WriteAllText($mockDeskPref, $deskMockPayload, (New-Object System.Text.UTF8Encoding($false)))
+
+    $extractedIds = @(Get-ClaudeResidualAccountMetadata -ClaudeCliConfigPath $mockCliJson -ClaudeCliDir $mockCliDir -ClaudeDesktopDir $mockDeskDir)
+    $extractedVals = @($extractedIds | ForEach-Object { $_.Value })
+    $extractedJoined = ($extractedIds | ConvertTo-Json -Depth 4)
+    $noSecretsExtracted = (-not $extractedJoined.Contains($fakeSecretAccess)) -and
+                          (-not $extractedJoined.Contains($fakeRefreshVal)) -and
+                          (-not $extractedJoined.Contains($fakeSessionVal)) -and
+                          (-not $extractedJoined.Contains('mock-user@example.invalid')) -and
+                          (-not $extractedJoined.Contains('99999999-9999-4999-8999-999999999999'))
+    Assert-True (
+        ($extractedIds.Count -eq 5) -and
+        ($extractedVals -contains '11111111-2222-4333-8444-555555555555') -and
+        ($extractedVals -contains 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee') -and
+        ($extractedVals -contains 'usr-mock-001122334455') -and
+        ($extractedVals -contains 'anon-mock-device-667788') -and
+        ($extractedVals -contains 'desk-dev-mock-445566') -and
+        $noSecretsExtracted
+    ) 'Get-ClaudeResidualAccountMetadata extracts only non-secret account/org/user/device UUIDs and never reads .credentials.json or tokens'
+
+    $mockAuditReport = [pscustomobject]@{
+        SchemaVersion = 3
+        Mode = 'Audit'
+        GeneratedUtc = [DateTime]::UtcNow.ToString('o')
+        PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+        Summary = [pscustomobject]@{
+            ResidualAccountIds = $extractedIds
+        }
+        EnvironmentLines = @('Sandbox mock summary line')
+        Inventory = @()
+    }
+    $mockAuditMdPath = Join-Path $sandbox 'AUDIT-UUID-MOCK.md'
+    $null = Write-AuditReportDocument -AuditPath $mockAuditMdPath -Lang 'zh-CN' -StructuredReport $mockAuditReport
+    $mockAuditMdText = [IO.File]::ReadAllText($mockAuditMdPath, [System.Text.Encoding]::UTF8)
+    Assert-True (
+        ($mockAuditMdText -match '11111111-2222-4333-8444-555555555555') -and
+        ($mockAuditMdText -match 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee') -and
+        (-not $mockAuditMdText.Contains($fakeSecretAccess)) -and
+        (-not $mockAuditMdText.Contains($fakeRefreshVal))
+    ) 'AUDIT.md report includes extracted non-secret Account/Org UUIDs cleanly and contains zero secrets'
 
     $notExecuted += 3
     Write-Output 'NOT_EXECUTED: live npm uninstall -g @anthropic-ai/claude-code (mocked only)'

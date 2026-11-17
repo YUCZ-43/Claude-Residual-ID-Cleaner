@@ -74,8 +74,13 @@ try {
         ($progText -match '#1E1E1E') -and
         ($progText -match '#252526') -and
         ($progText -match '#2D2D30') -and
-        ($progText -match 'ThemeStyle\s*=\s*"AdobeDarkSlate"')
-    ) 'Desktop WPF source defines Adobe dark slate theme palette and ThemeStyle contract'
+        ($progText -match 'ThemeStyle\s*=\s*"AdobeDarkSlate"') -and
+        ($progText -match 'SaveFileDialog') -and
+        ($progText -match 'GridSplitter') -and
+        ($progText -match 'HorizontalScrollBarVisibility\s*=\s*ScrollBarVisibility\.Auto') -and
+        ($progText -match '_chkSelectAll') -and
+        ($progText -match 'ResidualAccountIdRecord')
+    ) 'Desktop WPF source defines Adobe dark palette, SaveFileDialog, GridSplitter, HorizontalScrollBarVisibility, SelectAll, and Account ID card'
 
     Assert-True (
         ($progText -notmatch 'ExecutionPolicy\s*(Bypass|Unrestricted)|RegDeleteKeyW|SetFileInformationByHandle|NtDeleteKey|Remove-Item|Verb\s*=\s*"RunAs"') -and
@@ -127,6 +132,9 @@ try {
         $jZh.NavTabCount -eq 5 -and
         $jZh.MetricCardCount -eq 4 -and
         $jZh.ThemeStyle -eq 'AdobeDarkSlate' -and
+        $jZh.HasGridSplitter -and
+        $jZh.HasAccountIdCard -and
+        $jZh.HorizontalScrollEnabled -and
         (-not $jZh.InitialCleanButtonEnabled) -and
         $jZh.BackendFound -and
         $jZh.DryRun -and
@@ -168,6 +176,13 @@ try {
         }
     }
     Assert-True $pngValid "Compiled WPF .exe --demo-audit --capture-png produces valid PNG >20 KB in sandbox ($pngLen bytes)"
+
+    # 8. Verify --demo-audit populates non-secret residual Account IDs cleanly
+    $outDemo = Join-Path $appSandbox 'selftest-demo.json'
+    $pDemo = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --demo-audit --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$outDemo`"")
+    $pDemo.WaitForExit()
+    $jDemo = [IO.File]::ReadAllText($outDemo, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-True ($pDemo.ExitCode -eq 0 -and $jDemo.AccountIdCount -eq 3 -and $jDemo.HasAccountIdCard -and $jDemo.HasGridSplitter -and $jDemo.HorizontalScrollEnabled) 'Compiled WPF .exe --demo-audit populates 3 mock residual Account/Org/Device IDs alongside Stage K controls'
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; $($failedList.Count) failed"
     if ($failedList.Count -gt 0) { exit 1 }

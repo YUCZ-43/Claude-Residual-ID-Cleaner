@@ -9,7 +9,8 @@ param(
     [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ApprovedManifestSha256,
     [ValidateSet('Text', 'Json')][string]$OutputFormat = 'Text',
     [ValidateSet('Auto', 'zh-CN', 'en-US')][string]$Language = 'Auto',
-    [switch]$SaveAuditReport
+    [switch]$SaveAuditReport,
+    [string]$AuditOutputPath = ''
 )
 
 Set-StrictMode -Version 2.0
@@ -1430,6 +1431,154 @@ function Get-VsCodeClaudeDiscovery {
     }
 }
 
+function Test-SafeReadableConfigFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [int64]$MaxBytes = 2097152
+    )
+
+    if ([string]::IsNullOrWhiteSpace($FilePath)) { return $false }
+    if ((Get-TargetPresenceState -Path $FilePath).State -ne 'Present') { return $false }
+    try {
+        $item = Get-Item -LiteralPath $FilePath -Force -ErrorAction Stop
+        if ($item.PSIsContainer) { return $false }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+        if ($item.Length -le 0 -or $item.Length -gt $MaxBytes) { return $false }
+        $parent = Split-Path -Parent $item.FullName
+        while (-not [string]::IsNullOrWhiteSpace($parent)) {
+            $pItem = Get-Item -LiteralPath $parent -Force -ErrorAction Stop
+            if (($pItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+            $nextParent = Split-Path -Parent $parent
+            if ($nextParent -eq $parent) { break }
+            $parent = $nextParent
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Find-SafeClaudeAccountIdentifiersFromObject {
+    param(
+        [AllowNull()][object]$Node,
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$ConfigPath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Results,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$SeenKeys,
+        [int]$Depth = 0
+    )
+
+    if ($null -eq $Node -or $Depth -gt 5) { return }
+
+    if ($Node -is [System.Collections.IDictionary]) {
+        $keys = @($Node.Keys)
+    } elseif ($Node -is [System.Collections.IEnumerable] -and -not ($Node -is [string])) {
+        foreach ($elem in $Node) {
+            Find-SafeClaudeAccountIdentifiersFromObject -Node $elem -Source $Source -ConfigPath $ConfigPath -Results $Results -SeenKeys $SeenKeys -Depth ($Depth + 1)
+        }
+        return
+    } elseif ($Node.PSObject -and $Node.PSObject.Properties) {
+        $keys = @($Node.PSObject.Properties | ForEach-Object { $_.Name })
+    } else {
+        return
+    }
+
+    # Strictly allowlist ONLY non-secret identifier field names for user verification.
+    $allowedFieldMap = @{
+        'accountuuid'      = 'AccountUuid'
+        'organizationuuid' = 'OrganizationUuid'
+        'orguuid'          = 'OrganizationUuid'
+        'userid'           = 'UserId'
+        'anonymousid'      = 'DeviceId'
+        'deviceid'         = 'DeviceId'
+        'installationid'   = 'DeviceId'
+        'clientid'         = 'DeviceId'
+    }
+
+    foreach ($k in $keys) {
+        $kStr = [string]$k
+        $kLower = $kStr.ToLowerInvariant()
+        $val = if ($Node -is [System.Collections.IDictionary]) { $Node[$k] } else { $Node.$kStr }
+
+        if ($allowedFieldMap.ContainsKey($kLower)) {
+            if ($val -is [string] -or $val -is [ValueType]) {
+                $sVal = ([string]$val).Trim()
+                if (-not [string]::IsNullOrWhiteSpace($sVal) -and
+                    ($sVal -match '^[A-Za-z0-9._:-]{6,128}$') -and
+                    ($sVal -notmatch '@') -and
+                    ($sVal -notmatch '(?i)^(?:sk-|ghp_|github_pat_|eyJ|Bearer\b)')) {
+                    $dedupKey = "$Source|$kLower|$sVal"
+                    if ($SeenKeys.Add($dedupKey)) {
+                        $Results.Add([pscustomobject]@{
+                            Source     = $Source
+                            ConfigPath = $ConfigPath
+                            Field      = $kStr
+                            IdType     = $allowedFieldMap[$kLower]
+                            Value      = $sVal
+                        })
+                    }
+                }
+            }
+            continue
+        }
+
+        # Never inspect credential/secret/token/cookie/email properties or branches.
+        if ($kLower -match 'token|secret|password|key|cookie|credential|email|session') {
+            continue
+        }
+
+        if ($null -ne $val -and -not ($val -is [string]) -and -not ($val -is [ValueType])) {
+            Find-SafeClaudeAccountIdentifiersFromObject -Node $val -Source $Source -ConfigPath $ConfigPath -Results $Results -SeenKeys $SeenKeys -Depth ($Depth + 1)
+        }
+    }
+}
+
+function Get-ClaudeResidualAccountMetadata {
+    param(
+        [string]$ClaudeCliConfigPath = (Join-Path $env:USERPROFILE '.claude.json'),
+        [string]$ClaudeCliDir = (Join-Path $env:USERPROFILE '.claude'),
+        [string]$ClaudeDesktopDir = (Join-Path $env:APPDATA 'Claude')
+    )
+
+    $results = New-Object 'System.Collections.Generic.List[object]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    $candidates = New-Object 'System.Collections.Generic.List[object]'
+    if (-not [string]::IsNullOrWhiteSpace($ClaudeCliConfigPath)) {
+        $candidates.Add([pscustomobject]@{ Source = 'Claude Code CLI'; Path = $ClaudeCliConfigPath })
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ClaudeCliDir)) {
+        foreach ($name in @('config.json', 'settings.json', 'settings.local.json')) {
+            $candidates.Add([pscustomobject]@{ Source = 'Claude Code CLI'; Path = (Join-Path $ClaudeCliDir $name) })
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ClaudeDesktopDir)) {
+        foreach ($rel in @('config.json', 'claude_desktop_config.json', 'Preferences', 'Local State', 'sentry\scope_v3.json', 'window-state.json')) {
+            $candidates.Add([pscustomobject]@{ Source = 'Claude Desktop'; Path = (Join-Path $ClaudeDesktopDir $rel) })
+        }
+    }
+
+    foreach ($cand in $candidates) {
+        $leaf = [IO.Path]::GetFileName($cand.Path)
+        # Never open credential or secret-bearing files (for example .credentials.json)
+        if ($leaf -match '(?i)credential|secret|token|\.env') { continue }
+        if (-not (Test-SafeReadableConfigFile -FilePath $cand.Path)) { continue }
+
+        try {
+            $raw = [IO.File]::ReadAllText($cand.Path, [System.Text.Encoding]::UTF8)
+            if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+            $trimmed = $raw.TrimStart()
+            if (-not ($trimmed.StartsWith('{') -or $trimmed.StartsWith('['))) { continue }
+            $parsed = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
+            Find-SafeClaudeAccountIdentifiersFromObject -Node $parsed -Source $cand.Source -ConfigPath $cand.Path -Results $results -SeenKeys $seen
+        } catch {
+            continue
+        }
+    }
+
+    return @($results.ToArray())
+}
+
 function Get-WindowsResidualSummary {
     $pathEntries = New-Object 'System.Collections.Generic.List[object]'
     foreach ($scope in @('User', 'Machine')) {
@@ -1507,6 +1656,7 @@ function Get-WindowsResidualSummary {
         UninstallKeys = $uninstallKeys.ToArray()
         ProtocolKeys = $protocolKeys.ToArray()
         AclDiagnostics = $aclDiagnostics
+        ResidualAccountIds = @(Get-ClaudeResidualAccountMetadata)
     }
 }
 
@@ -1939,6 +2089,18 @@ function Get-EnvironmentReport {
         $lines.Add(('ACL diagnostic (read-only): {0}; status={1}; owner={2}; currentUserOwner={3}' -f
             $acl.Path, $acl.Status, $acl.Owner, $acl.IsCurrentUserOwner))
     }
+    $accountIds = @()
+    if ($summary.PSObject.Properties['ResidualAccountIds'] -and $null -ne $summary.ResidualAccountIds) {
+        $accountIds = @($summary.ResidualAccountIds)
+    }
+    if ($accountIds.Count -gt 0) {
+        foreach ($aid in $accountIds) {
+            $lines.Add(('Residual account/device ID (non-secret; {0}): {1}={2} ({3})' -f
+                $aid.Source, $aid.Field, $aid.Value, $aid.ConfigPath))
+        }
+    } else {
+        $lines.Add('Residual account/device ID count (non-secret metadata): 0')
+    }
     try {
         $wslRaw = (wsl.exe --list --verbose 2>&1 | Out-String)
         $wslExit = $LASTEXITCODE
@@ -1999,6 +2161,50 @@ function Write-AuditReportDocument {
     }
     foreach ($line in @($report.EnvironmentLines)) {
         $body.Add('- ' + [string]$line)
+    }
+    $body.Add('')
+    $accountIds = @()
+    if ($report -and $report.PSObject.Properties['Summary'] -and $null -ne $report.Summary -and $report.Summary.PSObject.Properties['ResidualAccountIds'] -and $null -ne $report.Summary.ResidualAccountIds) {
+        $accountIds = @($report.Summary.ResidualAccountIds)
+    }
+    if ($isZh) {
+        $body.Add('## 已识别残余账号 / 设备 ID（仅非敏感 UUID 元数据）')
+        $body.Add('')
+        $body.Add('说明：以下仅提取本地非敏感 `accountUuid`、`organizationUuid`、`userId` 与设备/安装 ID 供与网页控制台核对；严禁读取或导出 OAuth Access/Refresh Token、`sessionKey` 或任何秘密凭据。')
+        $body.Add('')
+        if ($accountIds.Count -eq 0) {
+            $body.Add('- 未在可安全读取的本地配置文件中检测到残余账号/设备 ID。')
+        } else {
+            $body.Add('| 来源 | ID 类型 | 字段名 | 识别值 | 配置文件 |')
+            $body.Add('| :--- | :--- | :--- | :--- | :--- |')
+            foreach ($aid in $accountIds) {
+                $body.Add(('| {0} | {1} | `{2}` | `{3}` | `{4}` |' -f
+                    ([string]$aid.Source).Replace('|', '\|'),
+                    ([string]$aid.IdType).Replace('|', '\|'),
+                    ([string]$aid.Field).Replace('|', '\|'),
+                    ([string]$aid.Value).Replace('|', '\|'),
+                    ([string]$aid.ConfigPath).Replace('|', '\|')))
+            }
+        }
+    } else {
+        $body.Add('## Detected Residual Account / Device IDs (Non-Secret UUID Metadata Only)')
+        $body.Add('')
+        $body.Add('Note: Extracts only non-secret `accountUuid`, `organizationUuid`, `userId`, and device/installation identifiers for user verification against the Claude web console; OAuth access/refresh tokens, `sessionKey`, and secrets are strictly never read or exported.')
+        $body.Add('')
+        if ($accountIds.Count -eq 0) {
+            $body.Add('- No residual account or device identifiers were found in safe readable local config files.')
+        } else {
+            $body.Add('| Source | ID Type | Field | Value | Config File |')
+            $body.Add('| :--- | :--- | :--- | :--- | :--- |')
+            foreach ($aid in $accountIds) {
+                $body.Add(('| {0} | {1} | `{2}` | `{3}` | `{4}` |' -f
+                    ([string]$aid.Source).Replace('|', '\|'),
+                    ([string]$aid.IdType).Replace('|', '\|'),
+                    ([string]$aid.Field).Replace('|', '\|'),
+                    ([string]$aid.Value).Replace('|', '\|'),
+                    ([string]$aid.ConfigPath).Replace('|', '\|')))
+            }
+        }
     }
     $body.Add('')
     if ($isZh) {
@@ -2751,7 +2957,18 @@ if ($MyInvocation.InvocationName -ne '.') {
     if ($Audit) {
         $auditReport = Get-StructuredAuditReport
         if ($SaveAuditReport) {
-            $null = Write-AuditReportDocument -AuditPath $script:AuditPath -Lang $script:ActiveLanguage -StructuredReport $auditReport
+            $targetAuditPath = $script:AuditPath
+            if (-not [string]::IsNullOrWhiteSpace($AuditOutputPath)) {
+                $fullOut = [IO.Path]::GetFullPath($AuditOutputPath)
+                if ((Get-TargetPresenceState -Path $fullOut).State -eq 'Present') {
+                    $itemOut = Get-Item -LiteralPath $fullOut -Force -ErrorAction Stop
+                    if ($itemOut.PSIsContainer -or (($itemOut.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                        throw "Refusing unsafe -AuditOutputPath target: $fullOut"
+                    }
+                }
+                $targetAuditPath = $fullOut
+            }
+            $null = Write-AuditReportDocument -AuditPath $targetAuditPath -Lang $script:ActiveLanguage -StructuredReport $auditReport
         }
         if ($OutputFormat -eq 'Json') {
             $auditReport | ConvertTo-Json -Depth 10 | Write-Output
