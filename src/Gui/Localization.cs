@@ -163,13 +163,20 @@ namespace ClaudeResidualIdCleaner
                 d["DryRunBody"] = "当前处于安全预览模式 (--dry-run)，已展示 -WhatIf 预览清单并阻止真实删除。";
                 d["ClaudeRunningTitle"] = "检测到 Claude 仍在运行";
                 d["ClaudeRunningBody"] = "检测到 Claude 客户端或后台进程仍在运行，为防止文件占用与数据损坏已暂停清理。请先在系统托盘彻底退出 Claude 后，点击确定重试。";
+                d["ClaudeRunningPromptBody"] = "检测到以下 Claude 进程仍在后台运行（已排除本清理工具自身）：\r\n{0}\r\n\r\n是否由本工具立即关闭这些进程并继续执行安全清理？";
                 d["VsCodeRunningTitle"] = "检测到 VS Code 仍在运行";
                 d["VsCodeRunningBody"] = "检测到 VS Code 仍在运行，为避免扩展残留删除失败，请先彻底关闭所有 VS Code 窗口后重试。";
                 d["FoundLabel"] = "已发现";
-                d["ExcludedLabel"] = "当前方案未包含";
+                d["ExcludedLabel"] = "需切换至完整清理";
                 d["CleanLabel"] = "无残留";
                 d["ProtectedLabel"] = "安全红线受保护";
+                d["ReviewLabel"] = "需人工复核";
                 d["ReadOnlyLabel"] = "只读核查";
+                d["PartialFailureTitle"] = "部分清理完成（部分文件被占用）";
+                d["PartialFailureBody"] =
+                    "已完成大部分清理（已移除 {0} 项），但有 {1} 项因文件被其他进程占用或权限受限而暂未删除。\r\n\r\n" +
+                    "已成功清理：\r\n{2}\r\n\r\n" +
+                    "仍被占用或未执行（请关闭相关程序或浏览器后重新扫描清理）：\r\n{3}";
             }
             else
             {
@@ -307,13 +314,20 @@ namespace ClaudeResidualIdCleaner
                 d["DryRunBody"] = "Running in safe --dry-run mode: -WhatIf preview was evaluated and real deletion was blocked.";
                 d["ClaudeRunningTitle"] = "Claude Is Still Running";
                 d["ClaudeRunningBody"] = "Claude Desktop or background Claude processes are currently running. Cleanup has been paused to prevent file locks. Please quit Claude completely from the system tray and retry.";
+                d["ClaudeRunningPromptBody"] = "The following Claude processes are still running in the background (excluding this cleaner):\r\n{0}\r\n\r\nWould you like this tool to close them now and continue cleaning?";
                 d["VsCodeRunningTitle"] = "VS Code Is Still Running";
                 d["VsCodeRunningBody"] = "VS Code is currently running. Please close all VS Code windows completely before removing its Claude extension and retry.";
                 d["FoundLabel"] = "Found";
-                d["ExcludedLabel"] = "Scope Excluded";
+                d["ExcludedLabel"] = "FullRemoval Scope";
                 d["CleanLabel"] = "Clean";
-                d["ProtectedLabel"] = "Protected";
+                d["ProtectedLabel"] = "OS Protected";
+                d["ReviewLabel"] = "Needs Review";
                 d["ReadOnlyLabel"] = "Read-Only Audit";
+                d["PartialFailureTitle"] = "Partial Cleanup Completed (Some Files Locked)";
+                d["PartialFailureBody"] =
+                    "Most residuals were cleaned ({0} removed), while {1} item(s) could not be deleted due to active file locks or access constraints.\r\n\r\n" +
+                    "Cleaned items:\r\n{2}\r\n\r\n" +
+                    "Locked or remaining items (close the locking app/browser, then re-scan and clean):\r\n{3}";
             }
             return d;
         }

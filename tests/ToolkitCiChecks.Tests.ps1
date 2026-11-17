@@ -378,6 +378,22 @@ try {
     }
     Assert-True ($allPngsValid -and ($rootReadmeText -match 'docs/images/logo\.png') -and ($enReadmeText -match 'docs/images/logo\.png')) 'Mascot logo.png and all embedded UI screenshot PNGs exist under docs/images/ (>20 KB, valid PNG header) and logo is showcased in both READMEs'
 
+    $demoGifPath = Join-Path $repoRoot 'docs\images\demo-workflow.gif'
+    $demoGifValid = $false
+    if (Test-Path -LiteralPath $demoGifPath -PathType Leaf) {
+        $gBytes = [IO.File]::ReadAllBytes($demoGifPath)
+        $demoGifValid = ($gBytes.Length -gt 20480 -and
+            $gBytes[0] -eq 0x47 -and $gBytes[1] -eq 0x49 -and $gBytes[2] -eq 0x46 -and
+            $gBytes[3] -eq 0x38 -and $gBytes[4] -eq 0x39 -and $gBytes[5] -eq 0x61)
+    }
+    Assert-True (
+        $demoGifValid -and
+        ($rootReadmeText -match 'docs/images/demo-workflow\.gif') -and
+        ($enReadmeText -match 'docs/images/demo-workflow\.gif') -and
+        ($rootReadmeText -match 'api\.star-history\.com/svg\?repos=YUCZ-43/claude-cleanup') -and
+        ($enReadmeText -match 'api\.star-history\.com/svg\?repos=YUCZ-43/claude-cleanup')
+    ) 'Animated demo-workflow.gif exists (>20 KB, valid GIF89a) and both READMEs embed demo GIF and Star History chart'
+
     $docLinkFiles = @($rootReadmePath, $enReadmePath, $skillsGuideZhPath, $skillsGuideEnPath)
     $allDocLinksOk = $true
     $docLinksChecked = 0

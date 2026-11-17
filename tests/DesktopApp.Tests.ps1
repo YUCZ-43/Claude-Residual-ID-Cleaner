@@ -321,6 +321,38 @@ try {
     $argsGen = [object[]]@($rawGeneric, 'en-US', $false, '')
     $msgGen = $mainWinType.GetMethod('TranslateFriendlyBackendError').Invoke($null, $argsGen)
 
+    $rawRunningProcs = "${esc}[31;1mException: ${esc}[0mClaude is running. Processes: Claude (PID=1234), claude-code (PID=5678). Shut it down normally and retry.${esc}[0m"
+    $rawRunningExeDot = "Claude is running. Processes: claude.exe (PID=99). Shut it down normally and retry."
+    $isClaudeErr = [bool]$mainWinType.GetMethod('IsClaudeRunningError').Invoke($null, @($rawRunningProcs))
+    $isNotClaudeErr = [bool]$mainWinType.GetMethod('IsClaudeRunningError').Invoke($null, @($rawGeneric))
+    $procListText = [string]$mainWinType.GetMethod('ExtractRunningProcessList').Invoke($null, @($rawRunningProcs))
+    $procListDotText = [string]$mainWinType.GetMethod('ExtractRunningProcessList').Invoke($null, @($rawRunningExeDot))
+    $procListFallback = [string]$mainWinType.GetMethod('ExtractRunningProcessList').Invoke($null, @($rawAnsiClaude))
+    $promptZh = [string]$mainWinType.GetMethod('FormatClaudeRunningPrompt').Invoke($null, @($rawRunningProcs, 'zh-CN'))
+    $promptEn = [string]$mainWinType.GetMethod('FormatClaudeRunningPrompt').Invoke($null, @($rawRunningProcs, 'en-US'))
+
+    $partialJson = [string](@{
+        PlanId = '11111111-1111-4111-8111-111111111111'
+        ManifestSha256 = ('a' * 64)
+        Policy = 'AccountData'
+        Outcome = 'PartialFailure'
+        Results = @(
+            @{ Id = 'cli-credentials'; Status = 'Removed'; Path = 'C:\Users\example\.claude\.credentials.json'; Error = '' },
+            @{ Id = 'desktop-buddy-tokens'; Status = 'Removed'; Path = 'C:\Users\example\AppData\Roaming\Claude\buddy-tokens.json'; Error = '' },
+            @{ Id = 'desktop-logs'; Status = 'Failed'; Path = 'C:\Users\example\AppData\Roaming\Claude\logs\chrome-native-host.log'; Error = 'Sharing violation (file in use)' }
+        )
+    } | ConvertTo-Json -Depth 5)
+
+    $isPfZh = $false
+    $pfArgsZh = [object[]]@($partialJson, '', 'zh-CN', $isPfZh)
+    $pfMsgZh = [string]$mainWinType.GetMethod('FormatPartialFailureMessage').Invoke($null, $pfArgsZh)
+
+    $isPfEn = $false
+    $pfArgsEn = [object[]]@($partialJson, '', 'en-US', $isPfEn)
+    $pfMsgEn = [string]$mainWinType.GetMethod('FormatPartialFailureMessage').Invoke($null, $pfArgsEn)
+
+    $locText = [IO.File]::ReadAllText((Join-Path $repoRoot 'src\Gui\Localization.cs'), [System.Text.Encoding]::UTF8)
+
     Assert-True (
         (-not $strippedClaude.Contains($esc)) -and
         ($strippedClaude -notmatch '\[31;1m|\[0m') -and
@@ -329,8 +361,30 @@ try {
         ([bool]$argsEn[2] -eq $true) -and
         ($msgEn -match 'Claude Desktop or background Claude processes are currently running') -and
         ([bool]$argsGen[2] -eq $false) -and
-        ($msgGen -eq 'Fatal error: access denied')
-    ) 'Compiled .exe strips ANSI escape codes cleanly and translates Claude-running error in zh-CN and en-US'
+        ($msgGen -eq 'Fatal error: access denied') -and
+        $isClaudeErr -and
+        (-not $isNotClaudeErr) -and
+        ($procListText -match ' - Claude \(PID=1234\)') -and
+        ($procListText -match ' - claude-code \(PID=5678\)') -and
+        ($procListDotText -match ' - claude\.exe \(PID=99\)') -and
+        ($procListFallback -eq ' - Claude') -and
+        ($promptZh -match '已排除本清理工具自身') -and
+        ($promptZh -match 'Claude \(PID=1234\)') -and
+        ($promptEn -match 'excluding this cleaner') -and
+        ($promptEn -match 'claude-code \(PID=5678\)') -and
+        ([bool]$pfArgsZh[3] -eq $true) -and
+        ($pfMsgZh -match '已移除 2 项') -and
+        ($pfMsgZh -match 'chrome-native-host\.log') -and
+        ([bool]$pfArgsEn[3] -eq $true) -and
+        ($pfMsgEn -match '2 removed') -and
+        ($pfMsgEn -match 'chrome-native-host\.log') -and
+        ($locText -match '需切换至完整清理') -and
+        ($locText -match 'FullRemoval Scope') -and
+        ($locText -match 'OS Protected') -and
+        ($progText -match 'ClassifyNonReadyToneAndLabel') -and
+        ($progText -match 'ConfirmCloseRunningClaudeProcesses') -and
+        ($progText -match '-CloseRunningProcesses')
+    ) 'Compiled .exe strips ANSI codes, separates OS Protected vs FullRemoval Scope badges, formats close-process prompts, and formats reassuring bilingual PartialFailure summaries'
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; $($failedList.Count) failed"
     if ($failedList.Count -gt 0) { exit 1 }

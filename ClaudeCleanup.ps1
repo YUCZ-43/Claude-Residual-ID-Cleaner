@@ -10,7 +10,8 @@ param(
     [ValidateSet('Text', 'Json')][string]$OutputFormat = 'Text',
     [ValidateSet('Auto', 'zh-CN', 'en-US')][string]$Language = 'Auto',
     [switch]$SaveAuditReport,
-    [string]$AuditOutputPath = ''
+    [string]$AuditOutputPath = '',
+    [switch]$CloseRunningProcesses
 )
 
 Set-StrictMode -Version 2.0
@@ -1741,24 +1742,37 @@ function Get-CurrentCandidates {
     $account = @(
         @('cli-credentials', (Join-Path $cli '.credentials.json'), 'Authentication'),
         @('cli-auth-cache', (Join-Path $cli 'mcp-needs-auth-cache.json'), 'Authentication cache'),
+        @('cli-global', (Join-Path $homePath '.claude.json'), 'Claude Code account metadata'),
         @('cli-cache', (Join-Path $cli 'cache'), 'Cache'),
         @('cli-stats', (Join-Path $cli 'stats-cache.json'), 'Cache'),
+        @('cli-session-env', (Join-Path $cli 'session-env'), 'Session cache'),
+        @('cli-telemetry', (Join-Path $cli 'telemetry'), 'Diagnostics'),
         @('native-staging', (Join-Path $homePath '.cache\claude\staging'), 'Installer cache'),
         @('desktop-buddy-tokens', (Join-Path $roaming 'Claude\buddy-tokens.json'), 'Authentication'),
+        @('desktop-cookies', (Join-Path $roaming 'Claude\Cookies'), 'Authentication'),
+        @('desktop-network', (Join-Path $roaming 'Claude\Network'), 'Authentication & session'),
+        @('desktop-preferences', (Join-Path $roaming 'Claude\Preferences'), 'Account & device metadata'),
+        @('desktop-local-storage', (Join-Path $roaming 'Claude\Local Storage'), 'Session & account storage'),
+        @('desktop-indexeddb', (Join-Path $roaming 'Claude\IndexedDB'), 'Session & account storage'),
+        @('desktop-session-storage', (Join-Path $roaming 'Claude\Session Storage'), 'Session & account storage'),
+        @('desktop-dips', (Join-Path $roaming 'Claude\DIPS'), 'Session & tracking state'),
+        @('desktop-trust-tokens', (Join-Path $roaming 'Claude\Trust Tokens'), 'Authentication cache'),
+        @('desktop-transport-security', (Join-Path $roaming 'Claude\TransportSecurity'), 'Network state'),
         @('desktop-cache', (Join-Path $roaming 'Claude\Cache'), 'Cache'),
         @('desktop-code-cache', (Join-Path $roaming 'Claude\Code Cache'), 'Cache'),
         @('desktop-gpu-cache', (Join-Path $roaming 'Claude\GPUCache'), 'Cache'),
+        @('desktop-dawn-graphite', (Join-Path $roaming 'Claude\DawnGraphiteCache'), 'Cache'),
+        @('desktop-dawn-webgpu', (Join-Path $roaming 'Claude\DawnWebGPUCache'), 'Cache'),
         @('desktop-logs', (Join-Path $roaming 'Claude\logs'), 'Diagnostics'),
+        @('local-cache', (Join-Path $local 'Claude\Cache'), 'Cache'),
         @('local-logs', (Join-Path $local 'Claude\logs'), 'Diagnostics')
     )
     foreach ($row in $account) {
-        $decision = if ($row[0] -eq 'desktop-buddy-tokens') { 'ReviewOnly' } else { 'Ready' }
-        $warning = if ($row[0] -eq 'desktop-buddy-tokens') { 'Filename suggests token state, but its role is unverified; separate decision required.' } else { '' }
-        $items.Add((Get-Candidate -Id $row[0] -Path $row[1] -Category $row[2] -Policy 'AccountData' -Decision $decision -Warning $warning))
+        $warning = if ($row[0] -eq 'cli-global') { 'Removes .claude.json account UUID and auth metadata; custom .claude/skills and .claude/commands are preserved.' } else { '' }
+        $items.Add((Get-Candidate -Id $row[0] -Path $row[1] -Category $row[2] -Policy 'AccountData' -Decision 'Ready' -Warning $warning))
     }
     $full = @(
         @('cli-home', $cli, 'Claude Code user data'),
-        @('cli-global', (Join-Path $homePath '.claude.json'), 'Claude Code mixed configuration'),
         @('cli-exe', (Join-Path $homePath '.local\bin\claude.exe'), 'Claude Code installation'),
         @('cli-versions', (Join-Path $homePath '.local\share\claude'), 'Claude Code installation'),
         @('cli-installer-cache', (Join-Path $homePath '.cache\claude'), 'Claude Code cache'),
@@ -1771,7 +1785,6 @@ function Get-CurrentCandidates {
         $decision = 'Ready'
         $warning = ''
         if ($row[0] -eq 'cli-home') { $warning = 'Removes skills, plugins, MCP settings, history, sessions, and other user-created data.' }
-        if ($row[0] -eq 'cli-global') { $warning = 'Also removes MCP configuration and per-project state.' }
         if ($row[0] -eq 'desktop-roaming') {
             $warning = 'Removes Desktop sessions, local files, extensions, Cowork data, and any user backup inside this directory.'
             $reaState = Get-TargetPresenceState (Join-Path $roaming 'Claude\claude_desktop_config.json.rea.backup')
@@ -1793,6 +1806,7 @@ function Get-CurrentCandidates {
     $desktopLocalReady = Test-RemovableRoot (Join-Path $local 'Claude')
     foreach ($row in $account) {
         $covered = switch -Regex ($row[0]) {
+            '^cli-global$' { $false; break }
             '^cli-' { $cliReady; break }
             '^native-' { $nativeCacheReady; break }
             '^desktop-' { $desktopRoamingReady; break }
@@ -1800,9 +1814,8 @@ function Get-CurrentCandidates {
             default { $false }
         }
         if ($covered) { continue }
-        $decision = if ($row[0] -eq 'desktop-buddy-tokens') { 'ReviewOnly' } else { 'Ready' }
-        $warning = if ($decision -eq 'ReviewOnly') { 'Authentication role unverified; separate decision required.' } else { 'Fallback because the parent directory is blocked or under review.' }
-        $items.Add((Get-Candidate -Id ('full-' + $row[0]) -Path $row[1] -Category $row[2] -Policy 'FullRemoval' -Decision $decision -Warning $warning))
+        $warning = if ($row[0] -eq 'cli-global') { 'Removes .claude.json account metadata and MCP state.' } else { 'Fallback because the parent directory is blocked or under review.' }
+        $items.Add((Get-Candidate -Id ('full-' + $row[0]) -Path $row[1] -Category $row[2] -Policy 'FullRemoval' -Decision 'Ready' -Warning $warning))
     }
     $vsDiscovery = Get-VsCodeClaudeDiscovery
     if ($vsDiscovery.ExtensionsRootState -eq 'Present') {
@@ -1956,6 +1969,134 @@ function Get-Inventory {
     return $records.ToArray()
 }
 
+function Get-ClaudeParentProcessId {
+    param([int]$TargetPid)
+    if ($TargetPid -le 0) { return 0 }
+    try {
+        $procCim = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = $TargetPid") -ErrorAction Stop
+        if ($null -ne $procCim -and $null -ne $procCim.ParentProcessId) {
+            return [int]$procCim.ParentProcessId
+        }
+    } catch {}
+    return 0
+}
+
+function Get-ClaudeProcess {
+    param(
+        [AllowNull()][object[]]$ProcessesOverride = $null,
+        [int]$SelfPid = $PID,
+        [int]$ParentPidOverride = -1,
+        [int]$GrandParentPidOverride = -1
+    )
+
+    $excludedPids = New-Object 'System.Collections.Generic.HashSet[int]'
+    if ($SelfPid -gt 0) { [void]$excludedPids.Add($SelfPid) }
+    $parentPid = if ($ParentPidOverride -ge 0) { $ParentPidOverride } else { Get-ClaudeParentProcessId -TargetPid $SelfPid }
+    if ($parentPid -gt 0) {
+        [void]$excludedPids.Add($parentPid)
+        $grandParentPid = if ($GrandParentPidOverride -ge 0) { $GrandParentPidOverride } else { Get-ClaudeParentProcessId -TargetPid $parentPid }
+        if ($grandParentPid -gt 0) { [void]$excludedPids.Add($grandParentPid) }
+    }
+
+    $rawList = if ($null -ne $ProcessesOverride) {
+        @($ProcessesOverride)
+    } else {
+        @(Get-Process -ErrorAction SilentlyContinue)
+    }
+
+    $projRootNorm = ''
+    if (-not [string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
+        try { $projRootNorm = [IO.Path]::GetFullPath($script:ProjectRoot).TrimEnd('\', '/') + '\' } catch {}
+    }
+
+    $matched = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($p in $rawList) {
+        if ($null -eq $p) { continue }
+        $procId = 0
+        if ($p.PSObject.Properties['Id'] -and $null -ne $p.Id) { $procId = [int]$p.Id }
+        if ($procId -gt 0 -and $excludedPids.Contains($procId)) { continue }
+
+        $procName = if ($p.PSObject.Properties['ProcessName'] -and $null -ne $p.ProcessName) { [string]$p.ProcessName } else { '' }
+        if ([string]::IsNullOrWhiteSpace($procName)) { continue }
+
+        # Strictly exclude self/cleaner executables even if their names contain "claude"
+        if ($procName -match '(?i)^(?:claude-residual-id-cleaner(?:-setup)?|claudecleanup(?:launcher|gui)?|claude-cleanup)(?:\.exe)?$' -or
+            $procName -match '(?i)residual-id-cleaner|claudecleanup') {
+            continue
+        }
+
+        $isDirectClaude = ($procName -match '^(?i:claude|claude desktop|claude-desktop|claude-code|claude-helper|claude-sandbox|anthropic-claude)$')
+        $isNativeHost = ($procName -match '^(?i:chrome-native-host)(?:\.exe)?$')
+        if (-not $isDirectClaude -and -not $isNativeHost) {
+            continue
+        }
+
+        $procPath = ''
+        try {
+            if ($p.PSObject.Properties['Path'] -and $null -ne $p.Path) {
+                $procPath = [string]$p.Path
+            } elseif ($p.PSObject.Properties['ExecutablePath'] -and $null -ne $p.ExecutablePath) {
+                $procPath = [string]$p.ExecutablePath
+            }
+        } catch {
+            $procPath = ''
+        }
+
+        $procCmd = ''
+        try {
+            if ($p.PSObject.Properties['CommandLine'] -and $null -ne $p.CommandLine) {
+                $procCmd = [string]$p.CommandLine
+            }
+        } catch {
+            $procCmd = ''
+        }
+
+        if ($isNativeHost) {
+            if ($null -eq $ProcessesOverride -and $procId -gt 0 -and ([string]::IsNullOrWhiteSpace($procPath) -or [string]::IsNullOrWhiteSpace($procCmd))) {
+                try {
+                    $cimProc = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = $procId") -ErrorAction Stop
+                    if ($null -ne $cimProc) {
+                        if ([string]::IsNullOrWhiteSpace($procPath) -and $null -ne $cimProc.ExecutablePath) {
+                            $procPath = [string]$cimProc.ExecutablePath
+                        }
+                        if ([string]::IsNullOrWhiteSpace($procCmd) -and $null -ne $cimProc.CommandLine) {
+                            $procCmd = [string]$cimProc.CommandLine
+                        }
+                    }
+                } catch {}
+            }
+            $matchesClaudeHost = ($procPath -match '(?i)(?:\\AnthropicClaude\\|\\Claude\\|\\WindowsApps\\Claude_|[\\/]Claude[\\/])') -or
+                ($procCmd -match '(?i)(?:com\.anthropic\.claude_browser_extension|AnthropicClaude|WindowsApps[\\/]Claude_|[\\/]Claude[\\/])')
+            if (-not $matchesClaudeHost) {
+                continue
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($procPath)) {
+            $leaf = ''
+            try { $leaf = [IO.Path]::GetFileName($procPath) } catch {}
+            if ($leaf -match '(?i)^(?:claude-residual-id-cleaner(?:-setup)?|claudecleanup(?:launcher|gui)?)(?:\.exe)?$') {
+                continue
+            }
+            if (-not [string]::IsNullOrEmpty($projRootNorm)) {
+                try {
+                    $fullProcPath = [IO.Path]::GetFullPath($procPath)
+                    if ($fullProcPath.StartsWith($projRootNorm, [StringComparison]::OrdinalIgnoreCase)) {
+                        continue
+                    }
+                } catch {}
+            }
+        }
+
+        $matched.Add([pscustomobject]@{
+            Id          = $procId
+            ProcessName = $procName
+            Path        = $procPath
+        })
+    }
+    return @($matched.ToArray())
+}
+
 function Get-EnvironmentReport {
     $lines = New-Object 'System.Collections.Generic.List[string]'
     $lines.Add('Windows user: ' + [Security.Principal.WindowsIdentity]::GetCurrent().Name)
@@ -1989,7 +2130,7 @@ function Get-EnvironmentReport {
             if ($entry -match '(?i)claude|anthropic|[\\/]\.local[\\/]bin$') { $lines.Add("$scope PATH entry: $entry") }
         }
     }
-    $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(?i:claude)(-|$)' })
+    $running = @(Get-ClaudeProcess)
     $lines.Add('Claude-named running processes: ' + $running.Count)
     $lines.Add('Node-based Claude processes cannot be attributed without reading command lines; close Claude normally before Apply.')
     foreach ($process in $running) { $lines.Add(('Process: {0} PID={1}' -f $process.ProcessName, $process.Id)) }
@@ -2621,7 +2762,10 @@ function Invoke-CleanupApply {
         [Parameter(Mandatory = $true)][ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ApprovedManifestSha256,
         [string]$PlanPath = $script:PlanPath,
         [string]$VerificationPath = $script:VerificationPath,
-        [AllowNull()][object[]]$CandidatesOverride = $null
+        [AllowNull()][object[]]$CandidatesOverride = $null,
+        [switch]$CloseRunningProcesses,
+        [AllowNull()][object[]]$ProcessesOverride = $null,
+        [AllowNull()][scriptblock]$StopProcessAction = $null
     )
     $auth = Read-AuthorizedPlanDocument -PlanPath $PlanPath -ApprovedHash $ApprovedManifestSha256
     $manifest = $auth.Manifest
@@ -2632,10 +2776,14 @@ function Invoke-CleanupApply {
     $skippedRecords = @($policyRecords | Where-Object { $_.Decision -ne 'Ready' })
     if ($selected.Count -eq 0) { throw "No Ready entries for policy $Policy." }
 
-    if ($null -eq $CandidatesOverride) {
-        $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(?i:claude)(-|$)' })
-        if ($running.Count -gt 0) { throw 'Claude is running. Shut it down normally and retry.' }
-        if ($Policy -eq 'FullRemoval' -and @($selected | Where-Object { $_.Id -like 'vscode-*' -or $_.Kind -eq 'VsCodeExtension' }).Count -gt 0) {
+    $runningClaudeProcesses = @()
+    if ($null -eq $CandidatesOverride -or $null -ne $ProcessesOverride) {
+        $runningClaudeProcesses = @(Get-ClaudeProcess -ProcessesOverride $ProcessesOverride)
+        if ($runningClaudeProcesses.Count -gt 0 -and -not $CloseRunningProcesses) {
+            $procSummary = ($runningClaudeProcesses | ForEach-Object { "$($_.ProcessName) (PID=$($_.Id))" }) -join ', '
+            throw "Claude is running. Processes: $procSummary. Shut it down normally and retry."
+        }
+        if ($null -eq $CandidatesOverride -and $Policy -eq 'FullRemoval' -and @($selected | Where-Object { $_.Id -like 'vscode-*' -or $_.Kind -eq 'VsCodeExtension' }).Count -gt 0) {
             $vscode = @(Get-Process -Name Code -ErrorAction SilentlyContinue)
             if ($vscode.Count -gt 0) { throw 'VS Code is running. Shut it down normally before removing its Claude extension.' }
         }
@@ -2684,6 +2832,27 @@ function Invoke-CleanupApply {
             Policy = $Policy
             Outcome = 'PreviewOnly'
             Results = $results.ToArray()
+        }
+    }
+
+    if ($CloseRunningProcesses -and $runningClaudeProcesses.Count -gt 0) {
+        foreach ($proc in $runningClaudeProcesses) {
+            if ($null -ne $StopProcessAction) {
+                & $StopProcessAction $proc
+            } elseif ($proc.Id -gt 0) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ($null -eq $ProcessesOverride) {
+            for ($waitStep = 0; $waitStep -lt 10; $waitStep++) {
+                Start-Sleep -Milliseconds 250
+                if (@(Get-ClaudeProcess).Count -eq 0) { break }
+            }
+            $stillRunning = @(Get-ClaudeProcess)
+            if ($stillRunning.Count -gt 0) {
+                $stillSummary = ($stillRunning | ForEach-Object { "$($_.ProcessName) (PID=$($_.Id))" }) -join ', '
+                throw "Claude is running. Processes: $stillSummary. Unable to close automatically; shut it down normally and retry."
+            }
         }
     }
 
@@ -3063,9 +3232,21 @@ if ($MyInvocation.InvocationName -ne '.') {
                 Write-Output ("Target: {0}; category={1}; kind={2}; path={3}" -f $record.Id, $record.Category, $record.Kind, $record.Path)
             }
         }
-        $applyResult = Invoke-CleanupApply -Policy $Policy -ApprovedManifestSha256 $ApprovedManifestSha256 -PlanPath $script:PlanPath -VerificationPath $script:VerificationPath -WhatIf:$WhatIfPreference -Confirm:$ConfirmPreference
+        $applyResult = $null
+        $applyPartialOrFailed = $false
+        try {
+            $applyResult = Invoke-CleanupApply -Policy $Policy -ApprovedManifestSha256 $ApprovedManifestSha256 -PlanPath $script:PlanPath -VerificationPath $script:VerificationPath -CloseRunningProcesses:$CloseRunningProcesses -WhatIf:$WhatIfPreference -Confirm:$ConfirmPreference
+        } catch {
+            if ($null -ne $_.Exception.Data -and $_.Exception.Data.Contains('ApplyResult') -and $null -ne $_.Exception.Data['ApplyResult']) {
+                $applyResult = $_.Exception.Data['ApplyResult']
+                $applyPartialOrFailed = $true
+            } else {
+                throw
+            }
+        }
         if ($OutputFormat -eq 'Json') {
             $applyResult | ConvertTo-Json -Depth 10 | Write-Output
+            if ($applyPartialOrFailed) { exit 2 }
             return
         }
         if ($applyResult.Outcome -eq 'PreviewOnly') {
@@ -3076,5 +3257,6 @@ if ($MyInvocation.InvocationName -ne '.') {
         $applyResult.Results | Format-Table Id, Policy, Status, ItemsRemoved, ItemsFailed, PartialRemoval, PresenceState, RemainingExists, VerifiedAbsent -AutoSize | Out-String -Width 260 | Write-Output
         if ($isZh) { Write-Output "执行结果: $($applyResult.Outcome)。请独立运行 -Verify 核验残余；本地清理不影响远端服务器账号状态。" }
         else { Write-Output "Apply outcome: $($applyResult.Outcome). Run -Verify independently; do not infer remote account changes." }
+        if ($applyPartialOrFailed) { exit 2 }
     }
 }

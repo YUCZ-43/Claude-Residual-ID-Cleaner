@@ -103,6 +103,7 @@ namespace ClaudeResidualIdCleaner
                 if (StatusTone == "ReadOnly") return MainWindow.BrushBadgeReadOnlyBg;
                 if (StatusTone == "Clean") return MainWindow.BrushBadgeCleanBg;
                 if (StatusTone == "Excluded") return MainWindow.BrushBadgeExcludedBg;
+                if (StatusTone == "Review") return MainWindow.BrushBadgeReviewBg;
                 return MainWindow.BrushBadgeProtectedBg;
             }
         }
@@ -115,6 +116,7 @@ namespace ClaudeResidualIdCleaner
                 if (StatusTone == "ReadOnly") return MainWindow.BrushBadgeReadOnlyBorder;
                 if (StatusTone == "Clean") return MainWindow.BrushBadgeCleanBorder;
                 if (StatusTone == "Excluded") return MainWindow.BrushBadgeExcludedBorder;
+                if (StatusTone == "Review") return MainWindow.BrushBadgeReviewBorder;
                 return MainWindow.BrushBadgeProtectedBorder;
             }
         }
@@ -127,6 +129,7 @@ namespace ClaudeResidualIdCleaner
                 if (StatusTone == "ReadOnly") return MainWindow.BrushBadgeReadOnlyFg;
                 if (StatusTone == "Clean") return MainWindow.BrushBadgeCleanFg;
                 if (StatusTone == "Excluded") return MainWindow.BrushBadgeExcludedFg;
+                if (StatusTone == "Review") return MainWindow.BrushBadgeReviewFg;
                 return MainWindow.BrushBadgeProtectedFg;
             }
         }
@@ -210,6 +213,9 @@ namespace ClaudeResidualIdCleaner
         internal static readonly Brush BrushBadgeExcludedBg = CreateBrush(44, 46, 54);
         internal static readonly Brush BrushBadgeExcludedBorder = CreateBrush(107, 114, 128);
         internal static readonly Brush BrushBadgeExcludedFg = CreateBrush(209, 213, 219);
+        internal static readonly Brush BrushBadgeReviewBg = CreateBrush(48, 42, 32);
+        internal static readonly Brush BrushBadgeReviewBorder = CreateBrush(180, 140, 68);
+        internal static readonly Brush BrushBadgeReviewFg = CreateBrush(253, 230, 138);
         internal static readonly Brush BrushBadgeProtectedBg = CreateBrush(58, 28, 52);
         internal static readonly Brush BrushBadgeProtectedBorder = CreateBrush(217, 70, 239);
         internal static readonly Brush BrushBadgeProtectedFg = CreateBrush(245, 208, 254);
@@ -229,6 +235,7 @@ namespace ClaudeResidualIdCleaner
         private int _readyCount;
         private string _lastVerifySummaryText = string.Empty;
         private bool _suppressSelectAllSync;
+        private int _busyDepth;
 
         private readonly ObservableCollection<ResidualGridRow> _allRows = new ObservableCollection<ResidualGridRow>();
         private readonly ObservableCollection<ResidualGridRow> _visibleRows = new ObservableCollection<ResidualGridRow>();
@@ -2236,6 +2243,10 @@ namespace ClaudeResidualIdCleaner
             if (isFull) _rbFullRemoval.IsChecked = true;
             else _rbAccountData.IsChecked = true;
 
+            _hasPlan = false;
+            _readyCount = 0;
+            _planSha256 = string.Empty;
+
             for (int i = 0; i < _allRows.Count; i++)
             {
                 ResidualGridRow r = _allRows[i];
@@ -2497,6 +2508,39 @@ namespace ClaudeResidualIdCleaner
             }
         }
 
+        private static void ClassifyNonReadyToneAndLabel(
+            Dictionary<string, string> s,
+            string itemId,
+            string policy,
+            string decision,
+            string activePolicy,
+            out string tone,
+            out string label)
+        {
+            bool isOsBoundary =
+                string.Equals(decision, "Blocked", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "desktop-msix-data", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "vscode-shared-obsolete", StringComparison.OrdinalIgnoreCase);
+
+            if (isOsBoundary)
+            {
+                tone = "Protected";
+                label = s["ProtectedLabel"];
+                return;
+            }
+            bool requiresFullRemoval =
+                !string.Equals(activePolicy, "FullRemoval", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(policy, "FullRemoval", StringComparison.OrdinalIgnoreCase);
+            if (requiresFullRemoval)
+            {
+                tone = "Excluded";
+                label = s["ExcludedLabel"];
+                return;
+            }
+            tone = "Review";
+            label = s["ReviewLabel"];
+        }
+
         private void RelocalizeExistingRows(Dictionary<string, string> s)
         {
             string activePolicy = GetActivePolicy();
@@ -2520,8 +2564,11 @@ namespace ClaudeResidualIdCleaner
                 }
                 else
                 {
-                    r.StatusTone = "Protected";
-                    r.Status = s["ProtectedLabel"];
+                    string tone;
+                    string label;
+                    ClassifyNonReadyToneAndLabel(s, r.ItemId, r.Policy, r.Decision, activePolicy, out tone, out label);
+                    r.StatusTone = tone;
+                    r.Status = label;
                 }
             }
         }
@@ -2557,21 +2604,20 @@ namespace ClaudeResidualIdCleaner
                 ConfigPath = @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Preferences"
             });
 
-            AddDemoRow(true, true, "ClaudeCode", "AccountData", "cli-credentials", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude\.credentials.json", s["FoundLabel"], "Ready", "Ready", "[AccountData] Confirmed Claude auth credentials cache", 18432);
-            AddDemoRow(false, false, "ClaudeCode", "FullRemoval", "cli-user-json", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude.json", s["ProtectedLabel"], "Protected", "ReviewOnly", "[AccountData] Preserved by AccountData; ReviewOnly under FullRemoval (contains accountUuid metadata)", 42190);
-            AddDemoRow(false, true, "ClaudeCode", "FullRemoval", "npm-claude-code", "NpmPackage", "npm Global Package", @"C:\Users\<USERNAME>\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] @anthropic-ai/claude-code package residue (requires FullRemoval policy)", 38450120);
-
+            AddDemoRow(true, true, "ClaudeCode", "AccountData", "cli-credentials", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude\.credentials.json", s["FoundLabel"], "Ready", "Ready", "[AccountData] Claude OAuth credentials cache", 18432);
+            AddDemoRow(true, true, "ClaudeCode", "AccountData", "cli-global", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude.json", s["FoundLabel"], "Ready", "Ready", "[AccountData] Account UUID & auth metadata (.claude.json)", 42190);
+            AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-buddy-tokens", "File", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\buddy-tokens.json", s["FoundLabel"], "Ready", "Ready", "[AccountData] Claude Desktop buddy token residual", 12288);
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-cache", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Cache", s["FoundLabel"], "Ready", "Ready", "[AccountData] Electron GPU/HTTP cache directory", 124620800);
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-network", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Network", s["FoundLabel"], "Ready", "Ready", "[AccountData] Session cookies & network state", 2450112);
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-logs", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Local\Claude\logs", s["FoundLabel"], "Ready", "Ready", "[AccountData] Desktop diagnostic log files", 845312);
-            AddDemoRow(false, false, "ClaudeDesktop", "AccountData", "desktop-local-storage", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Local Storage", s["ProtectedLabel"], "Protected", "ReviewOnly", "[AccountData] Protected mixed storage (preserved by default)", 15820000);
 
-            AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "vscode-ext", "VsCodeExtension", "VS Code Extension", @"C:\Users\<USERNAME>\.vscode\extensions\anthropic.claude-code-2.1.40", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] anthropic.claude-code extension cache (requires FullRemoval policy)", 48210400);
-            AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "chrome-native-host", "RegistryKey", "Browser Native Host", @"HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] Exact HKCU Chrome NativeMessagingHosts key (requires FullRemoval policy)", 0);
+            AddDemoRow(false, true, "ClaudeCode", "FullRemoval", "npm-claude-code", "NpmPackage", "npm Global Package", @"C:\Users\<USERNAME>\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] @anthropic-ai/claude-code package binary (switch to FullRemoval)", 38450120);
+            AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "vscode-ext", "VsCodeExtension", "VS Code Extension", @"C:\Users\<USERNAME>\.vscode\extensions\anthropic.claude-code-2.1.40", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] anthropic.claude-code IDE extension (switch to FullRemoval)", 48210400);
+            AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "chrome-native-host", "RegistryKey", "Browser Native Host", @"HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] Exact HKCU Chrome NativeMessagingHosts key (switch to FullRemoval)", 0);
+            AddDemoRow(false, false, "ClaudeDesktop", "FullRemoval", "desktop-msix-data", "Directory", "OS-managed MSIX data", @"C:\Users\<USERNAME>\AppData\Local\Packages\Claude_pzs8sxrjxfjjc", s["ProtectedLabel"], "Protected", "Blocked", "[OS Protected] WindowsApps / MSIX OS-managed junction folder (never direct-deleted)", 0);
 
             AddDemoRow(false, false, "CredentialManager", "ReadOnly", "cred-manager", "CredentialManager", "Credential Manager", "Claude* targets (count: 2)", s["ReadOnlyLabel"], "ReadOnly", "ReadOnly", "Credential Manager Claude* target count: 2 (secret values never read)", 0);
             AddDemoRow(false, false, "EnvironmentVars", "ReadOnly", "env-0", "EnvVar", "Env (User)", "ANTHROPIC_API_KEY", s["ReadOnlyLabel"], "ReadOnly", "ReadOnly", "Environment variable name only (secret value never read)", 0);
-            AddDemoRow(false, false, "EnvironmentVars", "ReadOnly", "env-1", "EnvVar", "Env (User)", "CLAUDE_CODE_USE_BEDROCK", s["ReadOnlyLabel"], "ReadOnly", "ReadOnly", "Environment variable name only (secret value never read)", 0);
 
             _hasScanned = true;
             _hasPlan = false;
@@ -2583,8 +2629,45 @@ namespace ClaudeResidualIdCleaner
             SyncSelectAllCheckbox();
 
             AppendLog("[DEMO] Populated sanitized mock audit inventory (12 entries; 3 non-secret UUIDs detected).");
-            AppendLog("[DEMO] Ready (AccountData): 4 | Scope Excluded (FullRemoval): 3 | Protected: 2 | Read-Only: 3.");
+            AppendLog("[DEMO] Ready (AccountData): 6 | FullRemoval Scope: 3 | OS Protected: 1 | Read-Only: 2.");
             AppendLog("[DEMO] Clean button remains locked until a verified SHA-256 plan is generated.");
+        }
+
+        public void ApplyDemoVerifiedState()
+        {
+            if (!_dryRun) return;
+            var s = Localization.GetStrings(_lang);
+            _allRows.Clear();
+            _accountIdRecords.Clear();
+
+            AddDemoRow(false, false, "ClaudeCode", "AccountData", "cli-credentials", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude\.credentials.json", s["CleanLabel"], "Clean", "Absent", "[VerifiedAbsent] Removed via Win32 handle-bound deletion", 0);
+            AddDemoRow(false, false, "ClaudeCode", "AccountData", "cli-global", "File", "Claude Code CLI", @"C:\Users\<USERNAME>\.claude.json", s["CleanLabel"], "Clean", "Absent", "[VerifiedAbsent] Removed via Win32 handle-bound deletion", 0);
+            AddDemoRow(false, false, "ClaudeDesktop", "AccountData", "desktop-buddy-tokens", "File", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\buddy-tokens.json", s["CleanLabel"], "Clean", "Absent", "[VerifiedAbsent] Removed via Win32 handle-bound deletion", 0);
+            AddDemoRow(false, false, "ClaudeDesktop", "AccountData", "desktop-cache", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Cache", s["CleanLabel"], "Clean", "Absent", "[VerifiedAbsent] Removed via Win32 handle-bound deletion", 0);
+            AddDemoRow(false, false, "ClaudeDesktop", "AccountData", "desktop-network", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Network", s["CleanLabel"], "Clean", "Absent", "[VerifiedAbsent] Removed via Win32 handle-bound deletion", 0);
+            AddDemoRow(false, false, "ClaudeDesktop", "AccountData", "desktop-logs", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Local\Claude\logs", s["CleanLabel"], "Clean", "Absent", "[VerifiedAbsent] Removed via Win32 handle-bound deletion", 0);
+
+            AddDemoRow(false, false, "ClaudeDesktop", "FullRemoval", "desktop-msix-data", "Directory", "OS-managed MSIX data", @"C:\Users\<USERNAME>\AppData\Local\Packages\Claude_pzs8sxrjxfjjc", s["ProtectedLabel"], "Protected", "Blocked", "[OS Protected] WindowsApps / MSIX OS-managed junction folder (untouched)", 0);
+            AddDemoRow(false, false, "CredentialManager", "ReadOnly", "cred-manager", "CredentialManager", "Credential Manager", "Claude* targets (count: 2)", s["ReadOnlyLabel"], "ReadOnly", "ReadOnly", "Read-only target count (secret values never read)", 0);
+            AddDemoRow(false, false, "EnvironmentVars", "ReadOnly", "env-0", "EnvVar", "Env (User)", "ANTHROPIC_API_KEY", s["ReadOnlyLabel"], "ReadOnly", "ReadOnly", "Environment variable name only (secret value never read)", 0);
+
+            _hasScanned = true;
+            _hasPlan = false;
+            _readyCount = 0;
+            _planSha256 = string.Empty;
+            _btnClean.IsEnabled = false;
+            _lastVerifySummaryText = string.Format(s["StatusVerified"], 6, 0);
+            _logsExpanded = true;
+            UpdateLogDrawerVisibility();
+            RefreshVisibleRows();
+            UpdateMetricCards();
+            UpdateAccountIdCard();
+            UpdatePlanCleanVerifyCards();
+            SyncSelectAllCheckbox();
+            _lblStatusBar.Text = _lastVerifySummaryText;
+
+            AppendLog("[DEMO] Cleanup applied for Policy=AccountData (6/6 Ready items removed via Win32 handle).");
+            AppendLog("[DEMO] VERIFICATION.md updated atomically; 0 cleanable residuals remaining.");
         }
 
         private void AddDemoRow(bool selected, bool canSelect, string scopeKey, string policy, string itemId, string kind, string category, string path, string status, string tone, string decision, string details, long sizeBytes)
@@ -2757,13 +2840,22 @@ namespace ClaudeResidualIdCleaner
 
         private void SetBusy(bool busy)
         {
-            _btnScan.IsEnabled = !busy;
-            _btnPlan.IsEnabled = !busy;
-            _btnVerify.IsEnabled = !busy;
-            _btnLangToggle.IsEnabled = !busy;
-            _btnExportSummary.IsEnabled = !busy;
-            _btnPolicyPill.IsEnabled = !busy;
-            _btnClean.IsEnabled = (!busy) && _hasScanned && _hasPlan && (_readyCount > 0);
+            if (busy)
+            {
+                _busyDepth++;
+            }
+            else if (_busyDepth > 0)
+            {
+                _busyDepth--;
+            }
+            bool isBusy = (_busyDepth > 0);
+            _btnScan.IsEnabled = !isBusy;
+            _btnPlan.IsEnabled = !isBusy;
+            _btnVerify.IsEnabled = !isBusy;
+            _btnLangToggle.IsEnabled = !isBusy;
+            _btnExportSummary.IsEnabled = !isBusy;
+            _btnPolicyPill.IsEnabled = !isBusy;
+            _btnClean.IsEnabled = (!isBusy) && _hasScanned && _hasPlan && (_readyCount > 0);
         }
 
         public static string StripAnsiEscapeCodes(string text)
@@ -2772,6 +2864,146 @@ namespace ClaudeResidualIdCleaner
             string cleaned = Regex.Replace(text, @"\x1B\[[0-9;?]*[A-Za-z]", string.Empty);
             cleaned = cleaned.Replace("\x1B", string.Empty);
             return cleaned;
+        }
+
+        public static bool IsClaudeRunningError(string rawError)
+        {
+            string cleaned = StripAnsiEscapeCodes(rawError);
+            return cleaned.IndexOf("Claude is running", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        public static string ExtractRunningProcessList(string rawError)
+        {
+            string cleaned = StripAnsiEscapeCodes(rawError);
+            Match m = Regex.Match(cleaned, @"Processes:\s*(.+?)(?=\.\s+(?:Shut|Unable)|[\r\n]|$)", RegexOptions.IgnoreCase);
+            if (m.Success && !string.IsNullOrWhiteSpace(m.Groups[1].Value))
+            {
+                string[] parts = m.Groups[1].Value.Split(',');
+                var lines = new List<string>();
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    string item = parts[i].Trim();
+                    if (!string.IsNullOrEmpty(item))
+                    {
+                        lines.Add(" - " + item);
+                    }
+                }
+                if (lines.Count > 0)
+                {
+                    return string.Join("\r\n", lines.ToArray());
+                }
+            }
+            return " - Claude";
+        }
+
+        public static string FormatClaudeRunningPrompt(string rawError, string lang)
+        {
+            var s = Localization.GetStrings(lang);
+            string procList = ExtractRunningProcessList(rawError);
+            return string.Format(s["ClaudeRunningPromptBody"], procList);
+        }
+
+        public static string FormatPartialFailureMessage(string jsonStdOut, string rawStdErr, string lang, out bool isPartialFailure)
+        {
+            isPartialFailure = false;
+            var s = Localization.GetStrings(lang);
+            string cleanErr = StripAnsiEscapeCodes(rawStdErr);
+
+            Dictionary<string, object> doc = null;
+            if (!string.IsNullOrWhiteSpace(jsonStdOut))
+            {
+                try
+                {
+                    doc = ParseJsonObject(jsonStdOut);
+                }
+                catch
+                {
+                    doc = null;
+                }
+            }
+
+            string outcome = (doc != null) ? GetDictString(doc, "Outcome") : string.Empty;
+            if (doc == null && !string.IsNullOrWhiteSpace(jsonStdOut))
+            {
+                Match om = Regex.Match(jsonStdOut, "\"Outcome\"\\s*:\\s*\"(PartialFailure|Failed)\"", RegexOptions.IgnoreCase);
+                if (om.Success) outcome = om.Groups[1].Value;
+            }
+            bool hasOutcomePartial =
+                string.Equals(outcome, "PartialFailure", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(outcome, "Failed", StringComparison.OrdinalIgnoreCase);
+
+            if (!hasOutcomePartial &&
+                cleanErr.IndexOf("PartialFailure", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return string.Empty;
+            }
+
+            isPartialFailure = true;
+            var cleanedLines = new List<string>();
+            var lockedLines = new List<string>();
+
+            object resObj;
+            if (doc != null && doc.TryGetValue("Results", out resObj) && resObj is ArrayList)
+            {
+                var items = (ArrayList)resObj;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    var r = items[i] as Dictionary<string, object>;
+                    if (r == null) continue;
+                    string status = GetDictString(r, "Status");
+                    string path = StripAnsiEscapeCodes(GetDictString(r, "Path"));
+                    string err = StripAnsiEscapeCodes(GetDictString(r, "Error"));
+                    if (string.Equals(status, "Removed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        cleanedLines.Add(" - " + path);
+                    }
+                    else if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(status, "NotExecuted", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string suffix = string.IsNullOrEmpty(err) ? string.Empty : " (" + err + ")";
+                        lockedLines.Add(" - " + path + suffix);
+                    }
+                }
+            }
+            else if (doc == null && !string.IsNullOrWhiteSpace(jsonStdOut))
+            {
+                // Fallback for .NET Core / PS 7 reflection tests where System.Web.Extensions is absent
+                Match om = Regex.Match(jsonStdOut, "\"Outcome\"\\s*:\\s*\"(PartialFailure|Failed)\"", RegexOptions.IgnoreCase);
+                if (!om.Success && cleanErr.IndexOf("PartialFailure", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    return string.Empty;
+                }
+                isPartialFailure = true;
+                MatchCollection entryMatches = Regex.Matches(jsonStdOut, "\\{[^{}]*\"Status\"\\s*:\\s*\"([^\"]+)\"[^{}]*\\}", RegexOptions.Singleline);
+                for (int i = 0; i < entryMatches.Count; i++)
+                {
+                    string block = entryMatches[i].Value;
+                    string status = entryMatches[i].Groups[1].Value;
+                    Match pm = Regex.Match(block, "\"Path\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
+                    Match em = Regex.Match(block, "\"Error\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
+                    string path = pm.Success ? Regex.Unescape(pm.Groups[1].Value) : string.Empty;
+                    string err = em.Success ? Regex.Unescape(em.Groups[1].Value) : string.Empty;
+                    if (string.Equals(status, "Removed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(path))
+                    {
+                        cleanedLines.Add(" - " + path);
+                    }
+                    else if ((string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(status, "NotExecuted", StringComparison.OrdinalIgnoreCase)) && !string.IsNullOrEmpty(path))
+                    {
+                        string suffix = string.IsNullOrEmpty(err) ? string.Empty : " (" + err + ")";
+                        lockedLines.Add(" - " + path + suffix);
+                    }
+                }
+            }
+
+            string noneText = string.Equals(lang, "zh-CN", StringComparison.OrdinalIgnoreCase) ? " - (无)" : " - (None)";
+            string cleanedText = (cleanedLines.Count > 0) ? string.Join("\r\n", cleanedLines.ToArray()) : noneText;
+            string lockedText = (lockedLines.Count > 0)
+                ? string.Join("\r\n", lockedLines.ToArray())
+                : (" - " + (string.IsNullOrWhiteSpace(cleanErr) ? "Target file locked" : cleanErr));
+
+            int remainingCount = (lockedLines.Count > 0) ? lockedLines.Count : 1;
+            return string.Format(s["PartialFailureBody"], cleanedLines.Count, remainingCount, cleanedText, lockedText);
         }
 
         public static string TranslateFriendlyBackendError(string rawError, string lang, out bool isProcessWarning, out string customTitle)
@@ -3017,10 +3249,17 @@ namespace ClaudeResidualIdCleaner
                                         string.Equals(policy, "AccountData", StringComparison.OrdinalIgnoreCase);
                         if (ready) activeCount++;
 
-                        string tone = ready ? (inPolicy ? "Ready" : "Excluded") : "Protected";
-                        string statusLabel = ready
-                            ? (inPolicy ? s["FoundLabel"] : s["ExcludedLabel"])
-                            : s["ProtectedLabel"];
+                        string tone;
+                        string statusLabel;
+                        if (ready)
+                        {
+                            tone = inPolicy ? "Ready" : "Excluded";
+                            statusLabel = inPolicy ? s["FoundLabel"] : s["ExcludedLabel"];
+                        }
+                        else
+                        {
+                            ClassifyNonReadyToneAndLabel(s, id, policy, decision, activePolicy, out tone, out statusLabel);
+                        }
 
                         _allRows.Add(new ResidualGridRow
                         {
@@ -3174,16 +3413,59 @@ namespace ClaudeResidualIdCleaner
         {
             if (_demoAudit) return;
             if (!EnsureBackend()) return;
-            var s = Localization.GetStrings(_lang);
             if (!_hasScanned || !_hasPlan || string.IsNullOrEmpty(_planSha256)) return;
 
             string policy = (_rbFullRemoval.IsChecked == true) ? "FullRemoval" : "AccountData";
+            RunCleanPreviewAndExecute(policy, false);
+        }
+
+        private bool ConfirmCloseRunningClaudeProcesses(string rawError)
+        {
+            var s = Localization.GetStrings(_lang);
+            string promptBody = FormatClaudeRunningPrompt(rawError, _lang);
+            AppendLog("[WARN] " + StripAnsiEscapeCodes(rawError).Trim());
+            MessageBoxResult res = MessageBox.Show(
+                this,
+                promptBody,
+                s["ClaudeRunningTitle"],
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            return (res == MessageBoxResult.Yes);
+        }
+
+        private void RunCleanPreviewAndExecute(string policy, bool closeRunningProcesses)
+        {
+            var s = Localization.GetStrings(_lang);
             AppendLog("Running -WhatIf preview before confirmation dialog...");
 
-            RunBackendAsync(new string[] { "-Apply", "-Policy", policy, "-ApprovedManifestSha256", _planSha256, "-Language", _lang, "-OutputFormat", "Json", "-WhatIf" }, delegate(BackendRunResult previewRes)
+            var previewArgs = new List<string>(new string[]
+            {
+                "-Apply", "-Policy", policy, "-ApprovedManifestSha256", _planSha256,
+                "-Language", _lang, "-OutputFormat", "Json", "-WhatIf"
+            });
+            if (closeRunningProcesses)
+            {
+                previewArgs.Add("-CloseRunningProcesses");
+            }
+
+            RunBackendAsync(previewArgs.ToArray(), delegate(BackendRunResult previewRes)
             {
                 if (previewRes.ExitCode != 0)
                 {
+                    if (!closeRunningProcesses && IsClaudeRunningError(previewRes.StdErr))
+                    {
+                        if (ConfirmCloseRunningClaudeProcesses(previewRes.StdErr))
+                        {
+                            AppendLog("User authorized closing running Claude processes; retrying preview...");
+                            RunCleanPreviewAndExecute(policy, true);
+                        }
+                        else
+                        {
+                            AppendLog("Cleanup cancelled: user declined closing running Claude processes.");
+                        }
+                        return;
+                    }
                     ShowBackendErrorDialog("[ERROR] Preview failed: ", previewRes.StdErr);
                     return;
                 }
@@ -3226,22 +3508,65 @@ namespace ClaudeResidualIdCleaner
                     return;
                 }
 
-                _lblStatusBar.Text = s["StatusApplying"];
-                AppendLog("User confirmed SHA256=" + _planSha256 + ". Executing ClaudeCleanup.ps1 -Apply...");
-                RunBackendAsync(new string[] { "-Apply", "-Policy", policy, "-ApprovedManifestSha256", _planSha256, "-Language", _lang, "-OutputFormat", "Json", "-Confirm:$false" }, delegate(BackendRunResult applyRes)
+                ExecuteCleanApply(policy, closeRunningProcesses);
+            });
+        }
+
+        private void ExecuteCleanApply(string policy, bool closeRunningProcesses)
+        {
+            var s = Localization.GetStrings(_lang);
+            _lblStatusBar.Text = s["StatusApplying"];
+            AppendLog("User confirmed SHA256=" + _planSha256 + ". Executing ClaudeCleanup.ps1 -Apply" + (closeRunningProcesses ? " -CloseRunningProcesses" : string.Empty) + "...");
+
+            var applyArgs = new List<string>(new string[]
+            {
+                "-Apply", "-Policy", policy, "-ApprovedManifestSha256", _planSha256,
+                "-Language", _lang, "-OutputFormat", "Json", "-Confirm:$false"
+            });
+            if (closeRunningProcesses)
+            {
+                applyArgs.Add("-CloseRunningProcesses");
+            }
+
+            RunBackendAsync(applyArgs.ToArray(), delegate(BackendRunResult applyRes)
+            {
+                if (applyRes.ExitCode != 0)
                 {
-                    if (applyRes.ExitCode != 0)
+                    if (!closeRunningProcesses && IsClaudeRunningError(applyRes.StdErr))
                     {
-                        ShowBackendErrorDialog("[ERROR] Cleanup exited " + applyRes.ExitCode + ": ", applyRes.StdErr);
+                        if (ConfirmCloseRunningClaudeProcesses(applyRes.StdErr))
+                        {
+                            AppendLog("User authorized closing running Claude processes; retrying Apply...");
+                            ExecuteCleanApply(policy, true);
+                        }
+                        else
+                        {
+                            AppendLog("Cleanup cancelled: user declined closing running Claude processes.");
+                        }
                         return;
                     }
-                    _hasPlan = false;
-                    _readyCount = 0;
-                    _planSha256 = string.Empty;
-                    UpdatePlanCleanVerifyCards();
-                    AppendLog("Cleanup complete; invoking automatic Verify...");
-                    OnVerifyClick(null, null);
-                });
+                    bool isPartialFailure;
+                    string partialMsg = FormatPartialFailureMessage(applyRes.StdOut, applyRes.StdErr, _lang, out isPartialFailure);
+                    if (isPartialFailure)
+                    {
+                        _hasPlan = false;
+                        _readyCount = 0;
+                        _planSha256 = string.Empty;
+                        UpdatePlanCleanVerifyCards();
+                        AppendLog("[WARN] Partial cleanup completed (some files locked); invoking Verify...");
+                        MessageBox.Show(this, partialMsg, s["PartialFailureTitle"], MessageBoxButton.OK, MessageBoxImage.Warning);
+                        OnVerifyClick(null, null);
+                        return;
+                    }
+                    ShowBackendErrorDialog("[ERROR] Cleanup exited " + applyRes.ExitCode + ": ", applyRes.StdErr);
+                    return;
+                }
+                _hasPlan = false;
+                _readyCount = 0;
+                _planSha256 = string.Empty;
+                UpdatePlanCleanVerifyCards();
+                AppendLog("Cleanup complete; invoking automatic Verify...");
+                OnVerifyClick(null, null);
             });
         }
 
@@ -3434,6 +3759,7 @@ namespace ClaudeResidualIdCleaner
             bool headless = false;
             bool dryRun = false;
             bool demoAudit = false;
+            bool demoVerified = false;
             int initialNavIndex = 0;
 
             for (int i = 0; i < args.Length; i++)
@@ -3450,6 +3776,10 @@ namespace ClaudeResidualIdCleaner
                 else if (string.Equals(a, "--demo-audit", StringComparison.OrdinalIgnoreCase))
                 {
                     demoAudit = true;
+                }
+                else if (string.Equals(a, "--demo-verified", StringComparison.OrdinalIgnoreCase))
+                {
+                    demoVerified = true;
                 }
                 else if (string.Equals(a, "--nav", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
@@ -3480,6 +3810,10 @@ namespace ClaudeResidualIdCleaner
             if (headless || !string.IsNullOrEmpty(selfTestOut))
             {
                 var win = new MainWindow(language, toolkitRoot, dryRun, demoAudit, initialNavIndex);
+                if (demoVerified && dryRun)
+                {
+                    win.ApplyDemoVerifiedState();
+                }
                 SelfTestReport report = win.BuildSelfTestReport();
                 win.Close();
                 if (!string.IsNullOrEmpty(selfTestOut))
@@ -3499,6 +3833,10 @@ namespace ClaudeResidualIdCleaner
             {
                 var captureApp = new Application();
                 var captureWin = new MainWindow(language, toolkitRoot, dryRun, demoAudit, initialNavIndex);
+                if (demoVerified && dryRun)
+                {
+                    captureWin.ApplyDemoVerifiedState();
+                }
                 captureWin.WindowStartupLocation = WindowStartupLocation.Manual;
                 captureWin.Left = -32000;
                 captureWin.Top = -32000;

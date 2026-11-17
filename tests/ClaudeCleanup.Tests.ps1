@@ -671,6 +671,102 @@ try {
         (-not $mockAuditMdText.Contains($fakeRefreshVal))
     ) 'AUDIT.md report includes extracted non-secret Account/Org UUIDs cleanly and contains zero secrets'
 
+    # Process detection (strict self/cleaner exclusion) and -CloseRunningProcesses safety flow
+    $mockProcList = @(
+        [pscustomobject]@{ Id = 1001; ProcessName = 'Claude-Residual-ID-Cleaner'; Path = 'C:\MockApps\claude-cleanup\Claude-Residual-ID-Cleaner.exe' },
+        [pscustomobject]@{ Id = 1002; ProcessName = 'Claude-Residual-ID-Cleaner-Setup'; Path = 'C:\MockApps\Downloads\Claude-Residual-ID-Cleaner-Setup.exe' },
+        [pscustomobject]@{ Id = 1003; ProcessName = 'ClaudeCleanupLauncher'; Path = 'C:\MockApps\claude-cleanup\ClaudeCleanupLauncher.exe' },
+        [pscustomobject]@{ Id = 1004; ProcessName = 'claude'; Path = 'C:\MockApps\Claude\claude.exe' },
+        [pscustomobject]@{ Id = 1005; ProcessName = 'claude'; Path = 'C:\MockApps\Claude\claude.exe' },
+        [pscustomobject]@{ Id = 1006; ProcessName = 'claude'; Path = 'C:\MockApps\Claude\claude.exe' },
+        [pscustomobject]@{ Id = 1007; ProcessName = 'claude'; Path = (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist\claude.exe') },
+        [pscustomobject]@{ Id = 1008; ProcessName = 'pwsh'; Path = 'C:\Program Files\PowerShell\7\pwsh.exe' },
+        [pscustomobject]@{ Id = 2001; ProcessName = 'Claude'; Path = 'C:\MockApps\AnthropicClaude\Claude.exe' },
+        [pscustomobject]@{ Id = 2002; ProcessName = 'claude-code'; Path = 'C:\MockApps\ClaudeCode\claude-code.exe' },
+        [pscustomobject]@{ Id = 2003; ProcessName = 'chrome-native-host'; Path = 'C:\MockApps\AnthropicClaude\chrome-native-host.exe'; CommandLine = '"C:\MockApps\AnthropicClaude\chrome-native-host.exe" chrome-extension://fcoeoabgfenejglbffodgkkbkcdhcgfn/' },
+        [pscustomobject]@{ Id = 2004; ProcessName = 'chrome-native-host'; Path = 'C:\MockApps\OtherVendor\native-host.exe'; CommandLine = '"C:\MockApps\OtherVendor\native-host.exe" com.anthropic.claude_browser_extension' },
+        [pscustomobject]@{ Id = 2005; ProcessName = 'chrome-native-host'; Path = 'C:\MockApps\1Password\chrome-native-host.exe'; CommandLine = '"C:\MockApps\1Password\chrome-native-host.exe" chrome-extension://aeblfdkhhhdcdjpifhhbdiojplfjncoa/' }
+    )
+    $detectedProcs = @(Get-ClaudeProcess -ProcessesOverride $mockProcList -SelfPid 1004 -ParentPidOverride 1005 -GrandParentPidOverride 1006)
+    $detectedIds = @($detectedProcs | ForEach-Object { [int]$_.Id })
+    Assert-True (
+        ($detectedProcs.Count -eq 4) -and
+        ($detectedIds -contains 2001) -and
+        ($detectedIds -contains 2002) -and
+        ($detectedIds -contains 2003) -and
+        ($detectedIds -contains 2004) -and
+        (-not ($detectedIds -contains 2005)) -and
+        (-not ($detectedIds -contains 1001)) -and
+        (-not ($detectedIds -contains 1002)) -and
+        (-not ($detectedIds -contains 1003)) -and
+        (-not ($detectedIds -contains 1004)) -and
+        (-not ($detectedIds -contains 1005)) -and
+        (-not ($detectedIds -contains 1006)) -and
+        (-not ($detectedIds -contains 1007))
+    ) 'Get-ClaudeProcess detects Claude and Claude-owned chrome-native-host.exe while excluding cleaner binaries, unrelated native hosts, self/parent/grandparent PIDs, and project paths'
+
+    # Sandboxed Get-CurrentCandidates verification for AccountData coverage
+    $candProfile = Join-Path $sandbox 'cand-profile'
+    $candRoaming = Join-Path $candProfile 'AppData\Roaming'
+    $candLocal = Join-Path $candProfile 'AppData\Local'
+    $candCliDir = Join-Path $candProfile '.claude'
+    $candDeskRoaming = Join-Path $candRoaming 'Claude'
+    New-Item -ItemType Directory -Path $candCliDir, $candDeskRoaming, (Join-Path $candLocal 'Claude\logs'), (Join-Path $candDeskRoaming 'Cache'), (Join-Path $candDeskRoaming 'Network'), (Join-Path $candDeskRoaming 'Local Storage'), (Join-Path $candDeskRoaming 'IndexedDB') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $candCliDir '.credentials.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $candCliDir 'mcp-needs-auth-cache.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $candCliDir 'stats-cache.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $candProfile '.claude.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $candDeskRoaming 'buddy-tokens.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $candDeskRoaming 'Preferences') -Value '{}'
+    $origProfile = $env:USERPROFILE; $origAppData = $env:APPDATA; $origLocalAppData = $env:LOCALAPPDATA
+    try {
+        $env:USERPROFILE = $candProfile; $env:APPDATA = $candRoaming; $env:LOCALAPPDATA = $candLocal
+        $sbCands = @(Get-CurrentCandidates)
+        $accReadyIds = @($sbCands | Where-Object { $_.Policy -eq 'AccountData' -and $_.Decision -eq 'Ready' } | ForEach-Object { $_.Id })
+        $fullGlobalIds = @($sbCands | Where-Object { $_.Policy -eq 'FullRemoval' -and $_.Id -eq 'full-cli-global' })
+        Assert-True (
+            ($accReadyIds -contains 'cli-credentials') -and
+            ($accReadyIds -contains 'cli-auth-cache') -and
+            ($accReadyIds -contains 'cli-stats') -and
+            ($accReadyIds -contains 'cli-global') -and
+            ($accReadyIds -contains 'desktop-buddy-tokens') -and
+            ($accReadyIds -contains 'desktop-preferences') -and
+            ($accReadyIds -contains 'desktop-network') -and
+            ($accReadyIds -contains 'desktop-local-storage') -and
+            ($accReadyIds -contains 'desktop-indexeddb') -and
+            ($fullGlobalIds.Count -eq 1)
+        ) 'Get-CurrentCandidates classifies all Claude account/UUID/token/cache residuals (including buddy-tokens.json and .claude.json) as Ready under AccountData'
+    } finally {
+        $env:USERPROFILE = $origProfile; $env:APPDATA = $origAppData; $env:LOCALAPPDATA = $origLocalAppData
+    }
+
+    $procTestDir = Join-Path $sandbox 'proc-close-e2e'
+    $procTargetDir = Join-Path $procTestDir 'target'
+    New-Item -ItemType Directory -Path $procTargetDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $procTargetDir 'cache.txt') -Value 'mock-cache'
+    $procPlanPath = Join-Path $procTestDir 'PLAN.md'
+    $procVerPath = Join-Path $procTestDir 'VERIFICATION.md'
+    $procCand = Get-Candidate -Id 'proc-sb-file' -Path $procTargetDir -Category 'Cache' -Policy 'AccountData' -Kind 'Filesystem' -Decision 'Ready' -AllowedRoots @($procTestDir)
+    $procPlanInfo = Invoke-CleanupPlan -PlanPath $procPlanPath -CandidatesOverride @($procCand)
+    $liveClaudeMock = @([pscustomobject]@{ Id = 2001; ProcessName = 'Claude'; Path = 'C:\MockApps\AnthropicClaude\Claude.exe' })
+
+    $threwRunning = $false
+    $runningErrMsg = ''
+    try {
+        $null = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $procPlanInfo.Sha256 -PlanPath $procPlanPath -VerificationPath $procVerPath -CandidatesOverride @($procCand) -ProcessesOverride $liveClaudeMock -WhatIf
+    } catch {
+        $threwRunning = $true
+        $runningErrMsg = $_.Exception.Message
+    }
+    Assert-True ($threwRunning -and $runningErrMsg -match 'Claude is running\. Processes: Claude \(PID=2001\)') 'Invoke-CleanupApply rejects running Claude processes with itemized PID list when -CloseRunningProcesses is omitted'
+
+    $script:stoppedMockPids = New-Object 'System.Collections.Generic.List[int]'
+    $procPreviewOut = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $procPlanInfo.Sha256 -PlanPath $procPlanPath -VerificationPath $procVerPath -CandidatesOverride @($procCand) -ProcessesOverride $liveClaudeMock -CloseRunningProcesses -StopProcessAction { param($p) [void]$script:stoppedMockPids.Add([int]$p.Id) } -WhatIf
+    Assert-True ($procPreviewOut.Outcome -eq 'PreviewOnly' -and $script:stoppedMockPids.Count -eq 0 -and (Test-Path -LiteralPath $procTargetDir)) '-CloseRunningProcesses under -WhatIf previews cleanly without terminating processes or deleting targets'
+
+    $procApplyOut = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $procPlanInfo.Sha256 -PlanPath $procPlanPath -VerificationPath $procVerPath -CandidatesOverride @($procCand) -ProcessesOverride $liveClaudeMock -CloseRunningProcesses -StopProcessAction { param($p) [void]$script:stoppedMockPids.Add([int]$p.Id) } -Confirm:$false
+    Assert-True ($procApplyOut.Outcome -eq 'Succeeded' -and $script:stoppedMockPids.Count -eq 1 -and $script:stoppedMockPids[0] -eq 2001 -and $procApplyOut.Results[0].VerifiedAbsent -and (-not (Test-Path -LiteralPath $procTargetDir))) '-CloseRunningProcesses with confirmed -Apply invokes process shutdown once, deletes target, and verifies absence'
+
     $notExecuted += 3
     Write-Output 'NOT_EXECUTED: live npm uninstall -g @anthropic-ai/claude-code (mocked only)'
     Write-Output 'NOT_EXECUTED: live code --uninstall-extension anthropic.claude-code (mocked only)'
