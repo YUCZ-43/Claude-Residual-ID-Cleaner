@@ -1,0 +1,303 @@
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$ciWorkflowPath = Join-Path $repoRoot '.github\workflows\ci.yml'
+$releaseScriptPath = Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1'
+
+$sandboxRoot = Join-Path $PSScriptRoot 'sandbox'
+$ciSandbox = Join-Path $sandboxRoot 'ci'
+$releaseSandbox = Join-Path $sandboxRoot 'release'
+
+if ((Test-Path -LiteralPath $ciSandbox) -or (Test-Path -LiteralPath $releaseSandbox)) {
+    throw "Toolkit CI sandbox directories already exist: $ciSandbox / $releaseSandbox"
+}
+
+New-Item -ItemType Directory -Path $ciSandbox -Force | Out-Null
+New-Item -ItemType Directory -Path $releaseSandbox -Force | Out-Null
+
+$passed = 0
+$skipped = 0
+$notExecuted = 0
+$failedList = New-Object 'System.Collections.Generic.List[string]'
+
+function Assert-True {
+    param(
+        [bool]$Condition,
+        [string]$Name
+    )
+    if (-not $Condition) {
+        $script:failedList.Add($Name)
+        throw "FAIL: $Name"
+    }
+    $script:passed++
+    Write-Output "PASS: $Name"
+}
+
+function Assert-Throws {
+    param(
+        [scriptblock]$Action,
+        [string]$Name
+    )
+    $threw = $false
+    try {
+        & $Action | Out-Null
+    } catch {
+        $threw = $true
+    }
+    Assert-True -Condition $threw -Name $Name
+}
+
+function Remove-SandboxDirectorySafely {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetDir,
+        [Parameter(Mandatory = $true)][string]$ExpectedParent
+    )
+    if (-not (Test-Path -LiteralPath $TargetDir)) { return }
+    $fullTarget = [IO.Path]::GetFullPath($TargetDir)
+    $fullParent = [IO.Path]::GetFullPath($ExpectedParent).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $fullTarget.StartsWith($fullParent, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean path outside sandbox root: $fullTarget"
+    }
+    $item = Get-Item -LiteralPath $fullTarget -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing to recursively clean reparse point: $fullTarget"
+    }
+    [IO.Directory]::Delete($fullTarget, $true)
+}
+
+try {
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    # 1. PowerShell AST syntax checks on owned scripts
+    foreach ($psFile in @($releaseScriptPath, $PSCommandPath)) {
+        $tokens = $null
+        $parseErrors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile($psFile, [ref]$tokens, [ref]$parseErrors)
+        Assert-True (@($parseErrors).Count -eq 0) "AST parse has 0 errors for $([IO.Path]::GetFileName($psFile))"
+    }
+
+    # 2. CI workflow YAML invariants (validated against .github/workflows/ci.yml and sandboxed simulations)
+    Assert-True (Test-Path -LiteralPath $ciWorkflowPath -PathType Leaf) 'CI workflow file exists at .github/workflows/ci.yml'
+    $ciYaml = [IO.File]::ReadAllText($ciWorkflowPath)
+    Assert-True (-not [string]::IsNullOrWhiteSpace($ciYaml)) 'CI workflow YAML is non-empty'
+    Assert-True ($ciYaml -notmatch "`t") 'CI workflow YAML contains no tab characters'
+    Assert-True ($ciYaml -match '(?m)^name:\s*CI\s*$') 'CI workflow defines top-level name'
+    Assert-True (($ciYaml -match '(?m)^on:\s*$') -and ($ciYaml -match '(?m)^\s+push:\s*$') -and ($ciYaml -match '(?m)^\s+pull_request:\s*$') -and ($ciYaml -match '(?m)^\s+workflow_dispatch:\s*$')) 'CI workflow configures push, pull_request, and workflow_dispatch triggers'
+    Assert-True ($ciYaml -match '(?m)^\s+contents:\s*read\s*$') 'CI workflow restricts token permissions to contents: read'
+    Assert-True ($ciYaml -match '(?m)^\s+runs-on:\s*windows-latest\s*$') 'CI workflow runs on windows-latest'
+    Assert-True ($ciYaml -match '(?m)^\s+fail-fast:\s*false\s*$') 'CI workflow sets fail-fast: false so both shells report independently'
+    Assert-True (($ciYaml -match 'gh_shell:\s*powershell\b') -and ($ciYaml -match 'shell_exe:\s*powershell\.exe\b') -and ($ciYaml -match 'expected_major:\s*5\b')) 'CI workflow includes Windows PowerShell 5.1 job'
+    Assert-True (($ciYaml -match 'gh_shell:\s*pwsh\b') -and ($ciYaml -match 'shell_exe:\s*pwsh\.exe\b') -and ($ciYaml -match 'expected_major:\s*7\b')) 'CI workflow includes PowerShell 7 job'
+    Assert-True ($ciYaml -match 'Parser\]::ParseFile') 'CI workflow performs PowerShell AST parse checks'
+    Assert-True (($ciYaml -match '\*\.Tests\.ps1') -and ($ciYaml -match '-Help') -and ($ciYaml -match '-Verify -OutputFormat Json')) 'CI workflow runs read-only CLI checks and full *.Tests.ps1 test suites'
+    Assert-True (($ciYaml -match 'GITHUB_STEP_SUMMARY') -and ($ciYaml -match 'CI_TEST_TOTALS') -and ($ciYaml -match 'not counted as Passed') -and ($ciYaml -match 'totalSkipped') -and ($ciYaml -match 'totalNotExecuted')) 'CI workflow visibly reports Skipped and NotExecuted without counting them as Passed'
+    Assert-True (($ciYaml -match 'LINK_CHECK_OK') -and ($ciYaml -match 'PRIVACY_CHECK_OK') -and ($ciYaml -match 'GIT_HYGIENE_OK')) 'CI workflow enforces Markdown link, privacy, and git hygiene checks'
+    Assert-True (($ciYaml -notmatch 'ExecutionPolicy\s+Bypass') -and ($ciYaml -notmatch '\s-Apply\b') -and ($ciYaml -notmatch 'Remove-AppxPackage') -and ($ciYaml -notmatch 'npm\s+uninstall')) 'CI workflow never invokes ExecutionPolicy Bypass or destructive uninstall/apply commands'
+
+    # Sandboxed CI behavior simulation inside tests/sandbox/ci/
+    $ciSimResultLog = Join-Path $ciSandbox 'sample-suite-output.txt'
+    $simOutput = @(
+        'PASS: sample check 1',
+        'PASS: sample check 2',
+        'SKIP: directory symlink test skipped (SeCreateSymbolicLinkPrivilege required)',
+        'NOT_EXECUTED: live HKCU NtDeleteKey test excluded by policy',
+        'RESULT: 84 passed; 4 skipped; 7 not_executed; 0 failed'
+    )
+    [IO.File]::WriteAllLines($ciSimResultLog, $simOutput)
+    $parsedLines = [IO.File]::ReadAllLines($ciSimResultLog)
+    $simPassed = 0
+    $simSkipped = 0
+    $simNotExec = 0
+    $simFailed = 0
+    foreach ($l in $parsedLines) {
+        if ($l -match 'RESULT:\s*(\d+)\s+passed;\s*(\d+)\s+skipped;\s*(\d+)\s+not_executed;\s*(\d+)\s+failed') {
+            $simPassed = [int]$Matches[1]
+            $simSkipped = [int]$Matches[2]
+            $simNotExec = [int]$Matches[3]
+            $simFailed = [int]$Matches[4]
+        }
+    }
+    Assert-True ($simPassed -eq 84 -and $simSkipped -eq 4 -and $simNotExec -eq 7 -and $simFailed -eq 0) 'CI result parser keeps Passed=84 separate from Skipped=4 and NotExecuted=7'
+
+    $ciLinkDir = Join-Path $ciSandbox 'docs'
+    New-Item -ItemType Directory -Path $ciLinkDir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $ciLinkDir 'target.md'), '# Target')
+    $ciMdFile = Join-Path $ciLinkDir 'index.md'
+    [IO.File]::WriteAllText($ciMdFile, "[ok](target.md)`n[broken](missing-file.md)")
+    $mdRaw = [IO.File]::ReadAllText($ciMdFile)
+    $mdMatches = [regex]::Matches($mdRaw, '\[[^\]]+\]\(([^)\s]+)\)')
+    $missingFound = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($m in $mdMatches) {
+        $cand = [IO.Path]::GetFullPath((Join-Path $ciLinkDir $m.Groups[1].Value))
+        if (-not (Test-Path -LiteralPath $cand)) {
+            $missingFound.Add($m.Groups[1].Value)
+        }
+    }
+    Assert-True ($missingFound.Count -eq 1 -and $missingFound[0] -eq 'missing-file.md') 'Sandboxed Markdown link validator detects broken relative link while accepting valid link'
+
+    # 3. Release packaging exclusions and SHA-256 verification inside tests/sandbox/release/
+    $fakeRepo = Join-Path $releaseSandbox 'fake-repo'
+    $customOut = Join-Path $releaseSandbox 'custom-out'
+    New-Item -ItemType Directory -Path $fakeRepo -Force | Out-Null
+
+    # Legitimate files expected in release ZIP
+    $legitFiles = @{
+        'ClaudeCleanup.ps1'             = '# cleanup script placeholder'
+        'README.md'                     = '**English** | [Chinese](README_zh-CN.md)'
+        'README_zh-CN.md'               = '[English](README.md)'
+        '.gitignore'                    = 'AUDIT.md'
+        '.github/workflows/ci.yml'      = 'name: CI'
+        'scripts/New-ReleasePackage.ps1'= '# release helper'
+        'tests/ClaudeCleanup.Tests.ps1' = '# tests'
+    }
+    foreach ($rel in $legitFiles.Keys) {
+        $dest = Join-Path $fakeRepo ($rel -replace '/', '\')
+        $parent = Split-Path -Parent $dest
+        if (-not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+        [IO.File]::WriteAllText($dest, $legitFiles[$rel])
+    }
+
+    # Forbidden/excluded files and directories that must NEVER enter the release ZIP
+    $excludedFixtures = @(
+        '.git/HEAD',
+        '.git/config',
+        'AGENTS.md',
+        'GOAL.md',
+        'PLAN.md',
+        'HANDOFF.md',
+        'AUDIT.md',
+        'CLEANUP-PLAN.md',
+        'VERIFICATION.md',
+        'host.audit.md',
+        'host.plan.md',
+        'host.verification.md',
+        'execution-ledger.json',
+        'custom.ledger.json',
+        'dist/stale-release.zip',
+        'tests/sandbox/temp-fixture.txt',
+        'sandbox/nested.txt',
+        '.credentials.json',
+        'claude-credentials.json',
+        'api-secret.json',
+        'buddy-tokens.json',
+        '.env',
+        '.env.local',
+        'dev.pfx',
+        'private.key',
+        'cert.pem',
+        'personal.log',
+        'logs/session.txt',
+        'notes.tmp',
+        'backup.bak',
+        '.claude/settings.json',
+        '.claude.json',
+        '.codex/config.toml',
+        '.agents/state.json',
+        '.gemini/settings.json',
+        '.vscode/settings.json',
+        'Thumbs.db'
+    )
+    foreach ($rel in $excludedFixtures) {
+        $dest = Join-Path $fakeRepo ($rel -replace '/', '\')
+        $parent = Split-Path -Parent $dest
+        if (-not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+        [IO.File]::WriteAllText($dest, "excluded-content:$rel")
+    }
+
+    $pkgResult = & $releaseScriptPath -SourceRoot $fakeRepo -OutputDirectory $customOut -Version '1.2.3-test'
+    Assert-True (Test-Path -LiteralPath $pkgResult.PackagePath -PathType Leaf) 'Release ZIP created in caller -OutputDirectory'
+    Assert-True (Test-Path -LiteralPath $pkgResult.Sha256SumsPath -PathType Leaf) 'SHA256SUMS.txt created in caller -OutputDirectory'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fakeRepo 'dist\Windows-Claude-Cleanup-1.2.3-test.zip'))) 'Caller -OutputDirectory does not write into SourceRoot/dist'
+
+    $zipEntries = New-Object 'System.Collections.Generic.List[string]'
+    $zipRead = [System.IO.Compression.ZipFile]::OpenRead($pkgResult.PackagePath)
+    try {
+        foreach ($entry in $zipRead.Entries) {
+            $zipEntries.Add($entry.FullName)
+        }
+    } finally {
+        $zipRead.Dispose()
+    }
+
+    $allLegitIncluded = $true
+    foreach ($rel in $legitFiles.Keys) {
+        if ($zipEntries -notcontains $rel) {
+            $allLegitIncluded = $false
+        }
+    }
+    Assert-True ($allLegitIncluded -and ($zipEntries.Count -eq $legitFiles.Count)) 'Release ZIP includes all expected legitimate files (including .github and .gitignore)'
+
+    $leakedExclusions = @($zipEntries | Where-Object {
+        $e = $_
+        ($e -match '(?i)^(?:\.git|dist|tests/sandbox|sandbox|logs|\.claude|\.codex|\.agents|\.gemini|\.vscode)/') -or
+        ($e -match '(?i)(?:AGENTS|GOAL|PLAN|HANDOFF|AUDIT|CLEANUP-PLAN|VERIFICATION)\.md$') -or
+        ($e -match '(?i)(?:credentials|secret|buddy-tokens|\.env|\.pfx|\.key|\.pem|\.log|\.tmp|\.bak|\.claude\.json|Thumbs\.db)')
+    })
+    Assert-True ($leakedExclusions.Count -eq 0) 'Release ZIP excludes .git/, orchestration docs, audit/plan/verification, dist/, tests/sandbox/, credentials, and personal logs'
+
+    # SHA-256 verification and tamper detection
+    $sumsText = ([IO.File]::ReadAllText($pkgResult.Sha256SumsPath)).Trim()
+    $actualSha = (Get-FileHash -LiteralPath $pkgResult.PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $zipLeaf = [IO.Path]::GetFileName($pkgResult.PackagePath)
+    Assert-True ($sumsText -eq "$actualSha  $zipLeaf") 'SHA256SUMS.txt matches actual ZIP SHA-256 in standard two-space format'
+
+    $tamperedZip = Join-Path $releaseSandbox 'tampered.zip'
+    $zipBytes = [IO.File]::ReadAllBytes($pkgResult.PackagePath)
+    $zipBytes[0] = [byte]($zipBytes[0] -bxor 0xFF)
+    [IO.File]::WriteAllBytes($tamperedZip, $zipBytes)
+    $tamperedSha = (Get-FileHash -LiteralPath $tamperedZip -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-True ($tamperedSha -ne $actualSha) 'Tampered release ZIP fails SHA-256 verification'
+
+    # 4. Default dist/ behavior inside tests/sandbox/release/default-dist-repo/
+    $defaultRepo = Join-Path $releaseSandbox 'default-dist-repo'
+    $defaultScriptsDir = Join-Path $defaultRepo 'scripts'
+    New-Item -ItemType Directory -Path $defaultScriptsDir -Force | Out-Null
+    $copiedReleaseScript = Join-Path $defaultScriptsDir 'New-ReleasePackage.ps1'
+    [IO.File]::Copy($releaseScriptPath, $copiedReleaseScript, $true)
+    [IO.File]::WriteAllText((Join-Path $defaultRepo 'README.md'), '# Sandbox Default Dist Repo')
+    [IO.File]::WriteAllText((Join-Path $defaultRepo '.git'), 'gitdir: ../fake-git')
+    [IO.File]::WriteAllText((Join-Path $defaultRepo 'AGENTS.md'), '# excluded')
+
+    $defaultRes1 = & $copiedReleaseScript
+    $expectedDistDir = Join-Path $defaultRepo 'dist'
+    Assert-True ($defaultRes1.PackagePath.StartsWith($expectedDistDir, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath (Join-Path $expectedDistDir 'SHA256SUMS.txt'))) 'New-ReleasePackage.ps1 defaults output to SourceRoot/dist/ and excludes .git file pointer'
+
+    # Re-run to verify existing dist/ is never packaged inside the new ZIP
+    $defaultRes2 = & $copiedReleaseScript
+    $zipRead2 = [System.IO.Compression.ZipFile]::OpenRead($defaultRes2.PackagePath)
+    $defaultEntries = New-Object 'System.Collections.Generic.List[string]'
+    try {
+        foreach ($entry in $zipRead2.Entries) {
+            $defaultEntries.Add($entry.FullName)
+        }
+    } finally {
+        $zipRead2.Dispose()
+    }
+    Assert-True ((@($defaultEntries | Where-Object { $_ -match '^dist/' }).Count -eq 0) -and ($defaultEntries -notcontains '.git') -and ($defaultEntries -notcontains 'AGENTS.md')) 'Re-running default dist/ build never self-includes dist/ or excluded files'
+
+    # 5. Fail-closed privacy gate in New-ReleasePackage.ps1
+    $leakRepo = Join-Path $releaseSandbox 'leak-repo'
+    New-Item -ItemType Directory -Path $leakRepo -Force | Out-Null
+    $fakeSid = ('S-1-5-21-' + '111111111-222222222-333333333-1001')
+    [IO.File]::WriteAllText((Join-Path $leakRepo 'README.md'), "Leaked SID: $fakeSid")
+    $leakOut = Join-Path $releaseSandbox 'leak-out'
+    Assert-Throws { & $releaseScriptPath -SourceRoot $leakRepo -OutputDirectory $leakOut -Version '0.0.1-leak' } 'New-ReleasePackage.ps1 fails closed when included file contains a user SID'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $leakOut 'Windows-Claude-Cleanup-0.0.1-leak.zip'))) 'Failed privacy gate leaves no release ZIP behind'
+
+    Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; 0 failed"
+} finally {
+    Remove-SandboxDirectorySafely -TargetDir $ciSandbox -ExpectedParent $sandboxRoot
+    Remove-SandboxDirectorySafely -TargetDir $releaseSandbox -ExpectedParent $sandboxRoot
+    if (Test-Path -LiteralPath $sandboxRoot) {
+        $remaining = @(Get-ChildItem -LiteralPath $sandboxRoot -Force)
+        if ($remaining.Count -eq 0) {
+            Remove-SandboxDirectorySafely -TargetDir $sandboxRoot -ExpectedParent $PSScriptRoot
+        }
+    }
+}

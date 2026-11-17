@@ -1,0 +1,348 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows PowerShell 5.1
+            gh_shell: powershell
+            shell_exe: powershell.exe
+            expected_major: 5
+          - name: PowerShell 7
+            gh_shell: pwsh
+            shell_exe: pwsh.exe
+            expected_major: 7
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Syntax parse and read-only CLI checks
+        shell: ${{ matrix.gh_shell }}
+        run: |
+          Set-StrictMode -Version 2.0
+          $ErrorActionPreference = 'Stop'
+
+          $expectedMajor = [int]'${{ matrix.expected_major }}'
+          $actualMajor = [int]$PSVersionTable.PSVersion.Major
+          Write-Host "Runtime: $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+          if ($expectedMajor -eq 5 -and $actualMajor -ne 5) {
+            throw "Expected Windows PowerShell 5.x, got $actualMajor"
+          }
+          if ($expectedMajor -ge 7 -and $actualMajor -lt 7) {
+            throw "Expected PowerShell 7+, got $actualMajor"
+          }
+
+          $repoRoot = (Resolve-Path -LiteralPath '.').Path
+          $psFiles = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -Filter '*.ps1' -File | Where-Object {
+            $rel = $_.FullName.Substring($repoRoot.Length).TrimStart('\', '/')
+            ($rel -notmatch '^(?:\.git|dist|tests[\\/]sandbox)(?:[\\/]|$)')
+          } | Sort-Object -Property FullName)
+
+          if ($psFiles.Count -eq 0) {
+            throw 'No PowerShell files discovered for syntax validation.'
+          }
+
+          $parseFailures = New-Object 'System.Collections.Generic.List[string]'
+          foreach ($file in $psFiles) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            $errList = @($errors)
+            if ($errList.Count -gt 0) {
+              foreach ($err in $errList) {
+                $parseFailures.Add("$($file.Name):$($err.Extent.StartLineNumber): $($err.Message)")
+              }
+            } else {
+              Write-Host "PARSE_OK: $($file.FullName.Substring($repoRoot.Length).TrimStart('\', '/'))"
+            }
+          }
+
+          if ($parseFailures.Count -gt 0) {
+            $parseFailures | ForEach-Object { Write-Error $_ }
+            throw "PowerShell syntax check failed with $($parseFailures.Count) error(s)."
+          }
+
+          $shellExe = '${{ matrix.shell_exe }}'
+          $prevEap = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          try {
+            $helpOutput = & $shellExe -NoProfile -NonInteractive -File (Join-Path $repoRoot 'ClaudeCleanup.ps1') -Help 2>&1
+            $helpExit = $LASTEXITCODE
+            $verifyOutput = & $shellExe -NoProfile -NonInteractive -File (Join-Path $repoRoot 'ClaudeCleanup.ps1') -Verify -OutputFormat Json 2>&1
+            $verifyExit = $LASTEXITCODE
+          } finally {
+            $ErrorActionPreference = $prevEap
+          }
+
+          if ($helpExit -ne 0) {
+            $helpOutput | ForEach-Object { Write-Host $_ }
+            throw "ClaudeCleanup.ps1 -Help exited with code $helpExit"
+          }
+          if ($verifyExit -ne 0) {
+            $verifyOutput | ForEach-Object { Write-Host $_ }
+            throw "ClaudeCleanup.ps1 -Verify -OutputFormat Json exited with code $verifyExit"
+          }
+
+          $verifyJson = ($verifyOutput | Out-String) | ConvertFrom-Json
+          if ($verifyJson.SchemaVersion -ne 3 -or $verifyJson.Mode -ne 'Verify') {
+            throw 'Unexpected JSON payload from ClaudeCleanup.ps1 -Verify -OutputFormat Json'
+          }
+          Write-Host 'CLI_SMOKE_OK: -Help and -Verify -OutputFormat Json exited 0.'
+
+      - name: Run full non-destructive test suites
+        shell: ${{ matrix.gh_shell }}
+        run: |
+          Set-StrictMode -Version 2.0
+          $ErrorActionPreference = 'Stop'
+
+          $repoRoot = (Resolve-Path -LiteralPath '.').Path
+          $shellExe = '${{ matrix.shell_exe }}'
+          $testFiles = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'tests') -Filter '*.Tests.ps1' -File | Sort-Object -Property FullName)
+          if ($testFiles.Count -eq 0) {
+            throw 'No *.Tests.ps1 files found under tests/.'
+          }
+
+          $totalPassed = 0
+          $totalSkipped = 0
+          $totalNotExecuted = 0
+          $totalFailed = 0
+          $suiteRows = New-Object 'System.Collections.Generic.List[object]'
+          $skipLines = New-Object 'System.Collections.Generic.List[string]'
+          $notExecutedLines = New-Object 'System.Collections.Generic.List[string]'
+          $failureMessages = New-Object 'System.Collections.Generic.List[string]'
+
+          foreach ($testFile in $testFiles) {
+            $suiteName = $testFile.Name
+            Write-Host "::group::$suiteName ($shellExe)"
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $rawLines = @()
+            $exitCode = 1
+            try {
+              $rawLines = @(& $shellExe -NoProfile -NonInteractive -File $testFile.FullName 2>&1 | ForEach-Object { "$_" })
+              $exitCode = $LASTEXITCODE
+            } finally {
+              $ErrorActionPreference = $prevEap
+            }
+
+            foreach ($line in $rawLines) {
+              Write-Host $line
+              if ($line -match '^\s*SKIP:\s*(.+)$') {
+                $skipLines.Add("[$suiteName] $($Matches[1])")
+              }
+              if ($line -match '^\s*NOT_EXECUTED:\s*(.+)$') {
+                $notExecutedLines.Add("[$suiteName] $($Matches[1])")
+              }
+            }
+            Write-Host '::endgroup::'
+
+            $resultMatch = $null
+            foreach ($line in $rawLines) {
+              if ($line -match 'RESULT:\s*(\d+)\s+passed;\s*(\d+)\s+skipped;\s*(\d+)\s+not_executed;\s*(\d+)\s+failed') {
+                $resultMatch = $Matches
+              }
+            }
+
+            if ($null -eq $resultMatch) {
+              $failureMessages.Add("${suiteName}: missing RESULT summary line (exit=$exitCode).")
+              $totalFailed++
+              $suiteRows.Add([pscustomobject]@{
+                Suite = $suiteName
+                Passed = 0
+                Skipped = 0
+                NotExecuted = 0
+                Failed = 1
+                ExitCode = $exitCode
+              })
+              continue
+            }
+
+            $p = [int]$resultMatch[1]
+            $s = [int]$resultMatch[2]
+            $n = [int]$resultMatch[3]
+            $f = [int]$resultMatch[4]
+
+            # Never count Skipped or NotExecuted as Passed.
+            $totalPassed += $p
+            $totalSkipped += $s
+            $totalNotExecuted += $n
+            $totalFailed += $f
+
+            if ($exitCode -ne 0 -or $f -gt 0) {
+              $failureMessages.Add("${suiteName}: failed=$f exitCode=$exitCode")
+            }
+
+            $suiteRows.Add([pscustomobject]@{
+              Suite = $suiteName
+              Passed = $p
+              Skipped = $s
+              NotExecuted = $n
+              Failed = $f
+              ExitCode = $exitCode
+            })
+          }
+
+          Write-Host ''
+          Write-Host "CI_TEST_TOTALS (${{ matrix.name }}): Passed=$totalPassed; Skipped=$totalSkipped; NotExecuted=$totalNotExecuted; Failed=$totalFailed"
+          if ($skipLines.Count -gt 0) {
+            Write-Host 'Visible Skipped Items (not counted as Passed):'
+            $skipLines | ForEach-Object { Write-Host "  - $_" }
+          }
+          if ($notExecutedLines.Count -gt 0) {
+            Write-Host 'Visible NotExecuted Items (not counted as Passed):'
+            $notExecutedLines | ForEach-Object { Write-Host "  - $_" }
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
+            $summaryLines = New-Object 'System.Collections.Generic.List[string]'
+            $summaryLines.Add("### ${{ matrix.name }} Test Summary")
+            $summaryLines.Add('')
+            $summaryLines.Add('| Suite | Passed | Skipped | NotExecuted | Failed | Exit Code |')
+            $summaryLines.Add('| :--- | ---: | ---: | ---: | ---: | ---: |')
+            foreach ($row in $suiteRows) {
+              $summaryLines.Add("| $($row.Suite) | $($row.Passed) | $($row.Skipped) | $($row.NotExecuted) | $($row.Failed) | $($row.ExitCode) |")
+            }
+            $summaryLines.Add("| **Total** | **$totalPassed** | **$totalSkipped** | **$totalNotExecuted** | **$totalFailed** | - |")
+            $summaryLines.Add('')
+            if ($skipLines.Count -gt 0) {
+              $summaryLines.Add('**Skipped (not counted as Passed):**')
+              foreach ($item in $skipLines) { $summaryLines.Add("- $item") }
+              $summaryLines.Add('')
+            }
+            if ($notExecutedLines.Count -gt 0) {
+              $summaryLines.Add('**NotExecuted (not counted as Passed):**')
+              foreach ($item in $notExecutedLines) { $summaryLines.Add("- $item") }
+              $summaryLines.Add('')
+            }
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($summaryLines -join [Environment]::NewLine) -Encoding UTF8
+          }
+
+          if ($failureMessages.Count -gt 0 -or $totalFailed -gt 0) {
+            throw ("Test suite failure: " + ($failureMessages -join '; '))
+          }
+
+      - name: Markdown link, privacy, and tracked-file hygiene checks
+        shell: ${{ matrix.gh_shell }}
+        run: |
+          Set-StrictMode -Version 2.0
+          $ErrorActionPreference = 'Stop'
+
+          $repoRoot = (Resolve-Path -LiteralPath '.').Path
+          $mdFiles = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -Filter '*.md' -File | Where-Object {
+            $rel = $_.FullName.Substring($repoRoot.Length).TrimStart('\', '/')
+            ($rel -notmatch '^(?:\.git|dist|tests[\\/]sandbox)(?:[\\/]|$)')
+          } | Sort-Object -Property FullName)
+
+          $brokenLinks = New-Object 'System.Collections.Generic.List[string]'
+          foreach ($md in $mdFiles) {
+            $raw = [IO.File]::ReadAllText($md.FullName)
+            $stripped = [regex]::Replace($raw, '(?ms)```.*?```', '')
+            $stripped = [regex]::Replace($stripped, '`[^`\r\n]+`', '')
+            $matches = [regex]::Matches($stripped, '\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)')
+            foreach ($m in $matches) {
+              $target = $m.Groups[1].Value
+              if ($target -match '^(?:https?://|mailto:|#)') { continue }
+              $cleanTarget = ($target -split '[#?]')[0]
+              if ([string]::IsNullOrWhiteSpace($cleanTarget)) { continue }
+              $candidate = Join-Path $md.DirectoryName ($cleanTarget -replace '/', '\')
+              $fullCandidate = [IO.Path]::GetFullPath($candidate)
+              $insideRepo = $fullCandidate.StartsWith($repoRoot, [StringComparison]::OrdinalIgnoreCase)
+              if ((-not $insideRepo) -or (-not (Test-Path -LiteralPath $fullCandidate))) {
+                $brokenLinks.Add("$($md.Name) -> $target")
+              }
+            }
+          }
+          if ($brokenLinks.Count -gt 0) {
+            $brokenLinks | ForEach-Object { Write-Error "BROKEN_LINK: $_" }
+            throw "Markdown link check failed with $($brokenLinks.Count) broken link(s)."
+          }
+          Write-Host "LINK_CHECK_OK: Verified $($mdFiles.Count) Markdown file(s)."
+
+          $scanFiles = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -File | Where-Object {
+            $rel = $_.FullName.Substring($repoRoot.Length).TrimStart('\', '/')
+            ($rel -notmatch '^(?:\.git|dist|tests[\\/]sandbox)(?:[\\/]|$)') -and
+            ($_.Extension -in @('.ps1', '.psm1', '.psd1', '.py', '.md', '.yml', '.yaml', '.json', '.cmd', '.txt'))
+          } | Sort-Object -Property FullName)
+
+          $sidPattern = 'S-1-5-21-' + '\d+-\d+-\d+-\d+'
+          $userPathPattern = '(?i)C:\\Users\\(?!(?:<USERNAME>|<USER>|<name>|username|user|example|Public|Default)(?:[\\"`\s]|$))[A-Za-z0-9._-]+\\'
+          $privKeyPattern = '-----BEGIN [A-Z ]*PRIVATE ' + 'KEY-----'
+          $tokenPattern = '(?:' + 'sk-' + 'ant-[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})'
+
+          $privacyHits = New-Object 'System.Collections.Generic.List[string]'
+          foreach ($f in $scanFiles) {
+            $rel = $f.FullName.Substring($repoRoot.Length).TrimStart('\', '/')
+            $text = [IO.File]::ReadAllText($f.FullName)
+            if ($text -match $sidPattern) { $privacyHits.Add("${rel}: domain/user SID pattern") }
+            if ($text -match $userPathPattern) { $privacyHits.Add("${rel}: local user profile path pattern") }
+            if ($text -match $privKeyPattern) { $privacyHits.Add("${rel}: private key header") }
+            if ($text -match $tokenPattern) { $privacyHits.Add("${rel}: credential token prefix") }
+          }
+          if ($privacyHits.Count -gt 0) {
+            $privacyHits | ForEach-Object { Write-Error "PRIVACY_HIT: $_" }
+            throw "Privacy scan failed with $($privacyHits.Count) hit(s)."
+          }
+          Write-Host "PRIVACY_CHECK_OK: Scanned $($scanFiles.Count) file(s) with 0 hits."
+
+          if (Get-Command git -ErrorAction SilentlyContinue) {
+            $tracked = @(& git ls-files)
+            $forbiddenTracked = @(
+              'AUDIT.md', 'CLEANUP-PLAN.md', 'VERIFICATION.md',
+              'AGENTS.md', 'GOAL.md', 'PLAN.md', 'HANDOFF.md'
+            )
+            $badTracked = @($tracked | Where-Object {
+              ($_ -in $forbiddenTracked) -or
+              ($_ -match '^(?:tests/sandbox|dist)/') -or
+              ($_ -match '(?:\.credentials\.json|buddy-tokens\.json|\.env(?:\.|$)|\.pfx$|\.p12$|\.key$|\.pem$|\.log$)')
+            })
+            if ($badTracked.Count -gt 0) {
+              throw ("Forbidden files tracked in Git: " + ($badTracked -join ', '))
+            }
+            Write-Host "GIT_HYGIENE_OK: Checked $($tracked.Count) tracked file(s)."
+          }
+
+      - name: Verify release package build and SHA-256 checksum
+        shell: ${{ matrix.gh_shell }}
+        run: |
+          Set-StrictMode -Version 2.0
+          $ErrorActionPreference = 'Stop'
+
+          $repoRoot = (Resolve-Path -LiteralPath '.').Path
+          $smokeOut = Join-Path $env:RUNNER_TEMP ('release-smoke-' + [Guid]::NewGuid().ToString('N'))
+          try {
+            $pkg = & (Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1') -OutputDirectory $smokeOut -Version '0.0.0-ci'
+            if (-not (Test-Path -LiteralPath $pkg.PackagePath)) {
+              throw "Release ZIP missing: $($pkg.PackagePath)"
+            }
+            if (-not (Test-Path -LiteralPath $pkg.Sha256SumsPath)) {
+              throw "SHA256SUMS.txt missing: $($pkg.Sha256SumsPath)"
+            }
+            $sumLine = ([IO.File]::ReadAllText($pkg.Sha256SumsPath)).Trim()
+            $actualHash = (Get-FileHash -LiteralPath $pkg.PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expectedLine = "$actualHash  $([IO.Path]::GetFileName($pkg.PackagePath))"
+            if ($sumLine -ne $expectedLine) {
+              throw "SHA256SUMS mismatch. Expected '$expectedLine', got '$sumLine'"
+            }
+            Write-Host "RELEASE_PACKAGE_OK: $($pkg.FileCount) files packaged, SHA-256 verified ($actualHash)."
+          } finally {
+            if (Test-Path -LiteralPath $smokeOut) {
+              Remove-Item -LiteralPath $smokeOut -Recurse -Force
+            }
+          }

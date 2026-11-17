@@ -1829,14 +1829,19 @@ function Get-EnvironmentReport {
     $pivot = Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Packages') -Directory -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match '^0_https___pivot\.claude\.ai' }
     foreach ($item in $pivot) { $lines.Add('Suspected Claude-related package data; ownership unverified: ' + $item.FullName) }
-    foreach ($task in (Get-ScheduledTask -ErrorAction SilentlyContinue)) {
-        $claudeAction = @($task.Actions | Where-Object {
-            $_.PSObject.Properties['Execute'] -and
-            ($_.Execute -match '(?i)(^|[\\/])claude(\.exe)?$' -or $_.Execute -match '(?i)WindowsApps[\\/]Claude_')
-        }).Count -gt 0
-        if ($task.TaskName -match '(?i)^Claude' -or $claudeAction) {
-            $lines.Add('Scheduled task candidate: ' + $task.TaskPath + $task.TaskName)
+    try {
+        $scheduledTasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue)
+        foreach ($task in $scheduledTasks) {
+            $claudeAction = @($task.Actions | Where-Object {
+                $_.PSObject.Properties['Execute'] -and
+                ($_.Execute -match '(?i)(^|[\\/])claude(\.exe)?$' -or $_.Execute -match '(?i)WindowsApps[\\/]Claude_')
+            }).Count -gt 0
+            if ($task.TaskName -match '(?i)^Claude' -or $claudeAction) {
+                $lines.Add('Scheduled task candidate: ' + $task.TaskPath + $task.TaskName)
+            }
         }
+    } catch {
+        $lines.Add('Scheduled task inspection unavailable: ' + $_.Exception.Message)
     }
     $summary = Get-WindowsResidualSummary
     foreach ($npmItem in $summary.NpmClaudePackages) {

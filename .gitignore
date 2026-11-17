@@ -30,6 +30,7 @@ buddy-tokens.json
 *.private.json
 
 # Temporary files, backups, and runtime logs
+dist/
 *.tmp
 *.temp
 *.bak
