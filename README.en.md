@@ -1,8 +1,12 @@
 [简体中文](README.md) | English | [Cross-Agent Skill Guide](docs/Skills-Usage-Guide.en.md) | [技能实战指南 (中文)](docs/Skills-Usage-Guide.md)
 
+<p align="center">
+  <img src="docs/images/logo.png" width="136" alt="claude-cleanup Mascot Logo" />
+</p>
+
 # claude-cleanup (`Claude Residual ID Cleaner`)
 
-**claude-cleanup** (desktop application: **Claude Residual ID Cleaner / Claude 账号残余 ID 清理工具**) is a non-destructive Windows standalone desktop application (`Claude-Residual-ID-Cleaner.exe`) and native PowerShell toolkit designed specifically to scan and safely clean residual account/device IDs, auth tokens, and session caches left behind after a Claude account ban across Claude Code CLI, Claude Desktop, VS Code/Cursor extensions, Windows Credential Manager, and environment variables — **strictly without altering or harming Windows OS itself**.
+**claude-cleanup** (desktop application: **Claude Residual ID Cleaner / Claude 账号残余 ID 清理工具**) is a non-destructive Windows standalone desktop application (available as both a portable single-file executable `Claude-Residual-ID-Cleaner.exe` and a Windows setup wizard `Claude-Residual-ID-Cleaner-Setup.exe`) plus a native PowerShell toolkit designed specifically to scan and safely inspect/clean residual account/device IDs (non-secret `accountUuid`, `organizationUuid`, `userId`, `deviceId` metadata only), auth tokens, and session caches left behind after a Claude account ban — **strictly without altering or harming Windows OS itself**.
 
 ![Claude Residual ID Cleaner Desktop Studio (zh-CN)](docs/images/ui-main-zh.png)
 
@@ -56,33 +60,36 @@
 - **PowerShell**: Full compatibility with **Windows PowerShell 5.1** (`powershell.exe`, built into Windows) and **PowerShell 7+** (`pwsh.exe`).
 - **Dependencies**: Zero third-party PowerShell modules, external binaries, Git, or REA runtime dependencies.
 
-### 3.2 Option 1: Standalone Windows Desktop App (`Claude-Residual-ID-Cleaner.exe`, Zero Console Window)
+### 3.2 Option 1: Standalone Windows Desktop App (Zero Console Window · On-Demand Elevation)
 
-#### Download & Double-Click Launch (GitHub Releases / GitHub Actions Artifacts)
+#### Download Options Compared (GitHub Releases / GitHub Actions Artifacts)
 
-End users do not need to install compilers or manually run build scripts:
+| Distribution | Best For | Privileges & Footprint | Launch & Uninstall |
+| :--- | :--- | :--- | :--- |
+| **Windows Setup Installer (`Claude-Residual-ID-Cleaner-Setup.exe`)** | Users who want Desktop/Start Menu shortcuts and clean Windows Settings Add/Remove Programs integration | Defaults to `%LOCALAPPDATA%\Programs\claude-cleanup` (**no UAC required**); defaults to `C:\Program Files\claude-cleanup` when run as Administrator | Download `claude-residual-id-cleaner-setup-exe` and follow the bilingual dark-slate wizard; uninstall cleanly via Windows Installed Apps (preserves reports and Claude data) |
+| **Portable Single-File (`Claude-Residual-ID-Cleaner.exe` + `claude-cleanup-<Version>.zip`)** | Engineering users who prefer zero-install portable execution or running directly alongside repository scripts | Zero installer footprint or Add/Remove Programs registry entries; ships with `asInvoker` manifest (**never forces UAC on launch**) | Download `claude-cleanup-release-bundle`, extract anywhere, and **double-click `Claude-Residual-ID-Cleaner.exe`** (or place `claude-residual-id-cleaner-exe` beside `ClaudeCleanup.ps1`) |
 
-1. Open the repository's **GitHub Releases** page or the **Artifacts** section at the bottom of the latest **GitHub Actions** CI run:
-   - **Full Release Bundle (Recommended)**: Download `claude-cleanup-release-bundle` (contains `claude-cleanup-<Version>.zip` and `SHA256SUMS.txt`). `claude-cleanup-<Version>.zip` bundles `Claude-Residual-ID-Cleaner.exe` directly at the archive root alongside `ClaudeCleanup.ps1`.
-   - **Standalone Executable Artifact**: Alternatively download `claude-residual-id-cleaner-exe` (`Claude-Residual-ID-Cleaner.exe`) and place it in a toolkit folder (or `dist\`) alongside `ClaudeCleanup.ps1`.
-2. Verify the archive SHA-256 digest (optional, recommended):
-   ```powershell
-   Get-FileHash .\claude-cleanup-0.1.0.zip -Algorithm SHA256
-   ```
-3. Extract `claude-cleanup-<Version>.zip` and **double-click `Claude-Residual-ID-Cleaner.exe`** to open the native WPF desktop studio with zero console window.
+#### On-Demand Administrator Elevation Design (Never Forced UAC)
 
-#### Build & Package Offline From Source
+- **Runs Standard User by Default**: Both `Claude-Residual-ID-Cleaner.exe` and `Claude-Residual-ID-Cleaner-Setup.exe` embed an explicit `asInvoker` manifest. Routine user-profile cleanup (`.claude`, `%APPDATA%\Claude`, `HKCU` browser host keys) completes without Administrator privileges.
+- **Header Privilege Badge & Explicit Restart Button**: The top studio bar displays the live privilege state (`Standard User` vs `Administrator`). Only if you need to clean machine-wide or ACL-protected residuals can you explicitly click **"Restart as Admin"** (confirming before triggering Windows UAC via `runas`).
 
-Source files under [src/Gui/](src/Gui/) compile offline with Windows' built-in `.NET Framework 4.x` C# compiler (`csc.exe`) into a single native WPF GUI executable (`IMAGE_SUBSYSTEM_WINDOWS_GUI`):
+#### Verify SHA-256 & Build Offline From Source
 
 ```powershell
-# 1. Build standalone executable offline -> .\dist\Claude-Residual-ID-Cleaner.exe
+# 1. (Optional) Verify release archive SHA-256
+Get-FileHash .\claude-cleanup-0.1.0.zip -Algorithm SHA256
+
+# 2. Generate multi-resolution mascot icon (docs/images/logo.png -> src/Gui/app.ico)
+.\scripts\New-AppIcon.ps1
+
+# 3. Compile portable zero-console desktop executable -> .\dist\Claude-Residual-ID-Cleaner.exe
 .\scripts\Build-DesktopApp.ps1
 
-# 2. Launch the desktop app
-.\dist\Claude-Residual-ID-Cleaner.exe
+# 4. Compile standalone bilingual Windows Setup wizard -> .\dist\Claude-Residual-ID-Cleaner-Setup.exe
+.\scripts\Build-Installer.ps1
 
-# 3. (Optional) Create release ZIP bundling Claude-Residual-ID-Cleaner.exe at archive root + SHA256SUMS.txt
+# 5. (Optional) Build release ZIP bundling Claude-Residual-ID-Cleaner.exe + SHA256SUMS.txt
 .\scripts\New-ReleasePackage.ps1
 ```
 

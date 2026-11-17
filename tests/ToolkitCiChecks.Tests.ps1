@@ -99,10 +99,13 @@ try {
         ($ciYaml -match '(?m)^\s+needs:\s*test\s*$') -and
         ($ciYaml -match 'actions/upload-artifact@v4') -and
         ($ciYaml -match 'claude-residual-id-cleaner-exe') -and
+        ($ciYaml -match 'claude-residual-id-cleaner-setup-exe') -and
         ($ciYaml -match 'claude-cleanup-release-bundle') -and
         ($ciYaml -match 'Claude-Residual-ID-Cleaner\.exe') -and
-        ($ciYaml -match 'New-ReleasePackage\.ps1')
-    ) 'CI workflow includes release-artifacts job building standalone .exe, release ZIP, SHA256SUMS.txt, and actions/upload-artifact@v4'
+        ($ciYaml -match 'Claude-Residual-ID-Cleaner-Setup\.exe') -and
+        ($ciYaml -match 'New-ReleasePackage\.ps1') -and
+        ($ciYaml -match 'Build-Installer\.ps1')
+    ) 'CI workflow includes release-artifacts job building standalone .exe, Setup .exe, release ZIP, SHA256SUMS.txt, and actions/upload-artifact@v4'
     Assert-True (($ciYaml -notmatch 'ExecutionPolicy\s+Bypass') -and ($ciYaml -notmatch '\s-Apply\b') -and ($ciYaml -notmatch 'Remove-AppxPackage') -and ($ciYaml -notmatch 'npm\s+uninstall')) 'CI workflow never invokes ExecutionPolicy Bypass or destructive uninstall/apply commands'
 
     # Sandboxed CI behavior simulation inside tests/sandbox/ci/
@@ -309,8 +312,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $exeFakeRepo 'README.md'), '# Sandboxed Desktop Bundle Test')
     [IO.File]::Copy((Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1'), (Join-Path $exeScriptsDir 'Build-DesktopApp.ps1'), $true)
     [IO.File]::Copy($releaseScriptPath, (Join-Path $exeScriptsDir 'New-ReleasePackage.ps1'), $true)
-    foreach ($csItem in @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src\Gui') -Filter '*.cs' -File)) {
-        [IO.File]::Copy($csItem.FullName, (Join-Path $exeGuiDir $csItem.Name), $true)
+    foreach ($guiItem in @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src\Gui') -File)) {
+        [IO.File]::Copy($guiItem.FullName, (Join-Path $exeGuiDir $guiItem.Name), $true)
     }
 
     $exePkgResult = & $releaseScriptPath -SourceRoot $exeFakeRepo -OutputDirectory $exeCustomOut -Version '1.2.3-exe'
@@ -357,7 +360,7 @@ try {
         (-not $skillsGuideEnText.Contains([char]0xFFFD))
     ) 'Primary README.md, README.en.md, and Skills-Usage-Guide*.md exist with zero emojis and clean UTF-8'
 
-    $requiredPngs = @('ui-main-zh.png', 'ui-scan-results-zh.png', 'ui-main-en.png')
+    $requiredPngs = @('logo.png', 'ui-main-zh.png', 'ui-scan-results-zh.png', 'ui-main-en.png')
     $allPngsValid = $true
     foreach ($pngName in $requiredPngs) {
         $pngPath = Join-Path $repoRoot ("docs\images\$pngName")
@@ -373,7 +376,7 @@ try {
             $allPngsValid = $false
         }
     }
-    Assert-True $allPngsValid 'All embedded UI screenshot PNGs exist under docs/images/ (>20 KB, valid PNG header)'
+    Assert-True ($allPngsValid -and ($rootReadmeText -match 'docs/images/logo\.png') -and ($enReadmeText -match 'docs/images/logo\.png')) 'Mascot logo.png and all embedded UI screenshot PNGs exist under docs/images/ (>20 KB, valid PNG header) and logo is showcased in both READMEs'
 
     $docLinkFiles = @($rootReadmePath, $enReadmePath, $skillsGuideZhPath, $skillsGuideEnPath)
     $allDocLinksOk = $true

@@ -1,15 +1,20 @@
 [CmdletBinding()]
 param(
-    [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$SourceRoot = '',
     [string]$OutputDirectory = '',
     [string]$PackageName = 'claude-cleanup',
     [string]$Version = '0.1.0',
     [string]$DesktopExePath = '',
-    [switch]$ExcludeDesktopExe
+    [switch]$ExcludeDesktopExe,
+    [switch]$BuildSetupExe
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
+    $SourceRoot = Split-Path -Parent $PSScriptRoot
+}
 
 if ([string]::IsNullOrWhiteSpace($PackageName) -or ($PackageName -notmatch '^[A-Za-z0-9._-]+$')) {
     throw "Invalid PackageName '$PackageName'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
@@ -296,6 +301,25 @@ $sumsContent = "$sha256Hex  $zipFileName`n"
 $utf8NoBom = New-Object 'System.Text.UTF8Encoding'($false)
 [IO.File]::WriteAllText($sumsPath, $sumsContent, $utf8NoBom)
 
+$setupExeOutPath = ''
+$setupExeSha256 = ''
+if ($BuildSetupExe) {
+    $buildInstallerScript = Join-Path $resolvedSourceRoot 'scripts\Build-Installer.ps1'
+    if (-not (Test-Path -LiteralPath $buildInstallerScript -PathType Leaf)) {
+        throw "Build-Installer.ps1 not found under: $resolvedSourceRoot"
+    }
+    $setupExeOutPath = Join-Path $resolvedOutputDir 'Claude-Residual-ID-Cleaner-Setup.exe'
+    $setupBuildRes = & $buildInstallerScript `
+        -SourceDir (Join-Path $resolvedSourceRoot 'src\Installer') `
+        -GuiSourceDir (Join-Path $resolvedSourceRoot 'src\Gui') `
+        -OutputPath $setupExeOutPath `
+        -Version $Version
+    if ($null -eq $setupBuildRes -or -not $setupBuildRes.Succeeded -or -not (Test-Path -LiteralPath $setupExeOutPath -PathType Leaf)) {
+        throw 'Failed to build Claude-Residual-ID-Cleaner-Setup.exe during release packaging.'
+    }
+    $setupExeSha256 = [string]$setupBuildRes.Sha256
+}
+
 [pscustomobject]@{
     PackagePath     = $zipPath
     Sha256SumsPath  = $sumsPath
@@ -304,4 +328,6 @@ $utf8NoBom = New-Object 'System.Text.UTF8Encoding'($false)
     ExcludedCount   = $excludedPaths.Count
     IncludedFiles   = @($sortedIncluded | ForEach-Object { $_.RelativePath })
     ExcludedFiles   = @($excludedPaths)
+    SetupExePath    = $setupExeOutPath
+    SetupExeSha256  = $setupExeSha256
 }

@@ -278,7 +278,7 @@ jobs:
           $scanFiles = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -File | Where-Object {
             $rel = $_.FullName.Substring($repoRoot.Length).TrimStart('\', '/')
             ($rel -notmatch '^(?:\.git|dist|tests[\\/]sandbox)(?:[\\/]|$)') -and
-            ($_.Extension -in @('.ps1', '.psm1', '.psd1', '.py', '.cs', '.md', '.yml', '.yaml', '.json', '.cmd', '.txt'))
+            ($_.Extension -in @('.ps1', '.psm1', '.psd1', '.py', '.cs', '.manifest', '.md', '.yml', '.yaml', '.json', '.cmd', '.txt'))
           } | Sort-Object -Property FullName)
 
           $sidPattern = 'S-1-5-21-' + '\d+-\d+-\d+-\d+'
@@ -428,13 +428,56 @@ jobs:
               throw "Standalone WPF .exe headless self-test exited $($proc.ExitCode)"
             }
             $report = [IO.File]::ReadAllText($selfTestJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-            if (-not $report.AppInstantiated -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled) {
+            if (-not $report.AppInstantiated -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled -or (-not $report.HasWindowIcon)) {
               throw 'Standalone WPF .exe self-test reported invalid UI/safety state.'
             }
             Write-Host "RELEASE_EXE_OK: Built $($build.SizeBytes) bytes, PE Subsystem=$subsystem, SHA256=$($build.Sha256)."
           } finally {
             if (Test-Path -LiteralPath $selfTestJson) {
               Remove-Item -LiteralPath $selfTestJson -Force
+            }
+          }
+
+      - name: Build and verify standalone Setup Installer .exe
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version 2.0
+          $ErrorActionPreference = 'Stop'
+
+          $repoRoot = (Resolve-Path -LiteralPath '.').Path
+          $artifactDir = Join-Path '${{ runner.temp }}' 'release-artifacts'
+          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner.exe'
+          $setupOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-Setup.exe'
+          $setupSmokeDir = Join-Path '${{ runner.temp }}' ('setup-smoke-' + [Guid]::NewGuid().ToString('N'))
+          $setupSelfTest = Join-Path $setupSmokeDir 'setup-selftest.json'
+          $setupInstallRoot = Join-Path $setupSmokeDir 'installed-app'
+
+          try {
+            $setupBuild = & (Join-Path $repoRoot 'scripts\Build-Installer.ps1') -OutputPath $setupOut -DesktopExePath $exeOut
+            if (-not $setupBuild.Succeeded -or -not (Test-Path -LiteralPath $setupOut -PathType Leaf)) {
+              throw 'Failed to compile Claude-Residual-ID-Cleaner-Setup.exe for release artifacts.'
+            }
+
+            $bytes = [System.IO.File]::ReadAllBytes($setupOut)
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            $subsystem = [int][BitConverter]::ToUInt16($bytes, $peOffset + 24 + 68)
+            if ($subsystem -ne 2) {
+              throw "Expected Setup PE Subsystem 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI), got $subsystem"
+            }
+
+            $pInst = [System.Diagnostics.Process]::Start($setupOut, "--headless --no-registry --no-shortcuts --install-dir `"$setupInstallRoot`" --self-test `"$setupSelfTest`"")
+            $pInst.WaitForExit()
+            if ($pInst.ExitCode -ne 0) {
+              throw "Setup .exe headless install smoke test exited $($pInst.ExitCode)"
+            }
+            $instRep = [IO.File]::ReadAllText($setupSelfTest, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if (-not $instRep.Succeeded -or -not $instRep.HasWindowIcon) {
+              throw 'Setup .exe headless install self-test reported invalid state.'
+            }
+            Write-Host "RELEASE_SETUP_OK: Built $($setupBuild.SizeBytes) bytes, PE Subsystem=$subsystem, SHA256=$($setupBuild.Sha256)."
+          } finally {
+            if (Test-Path -LiteralPath $setupSmokeDir) {
+              Remove-Item -LiteralPath $setupSmokeDir -Recurse -Force
             }
           }
 
@@ -484,6 +527,13 @@ jobs:
         with:
           name: claude-residual-id-cleaner-exe
           path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner.exe
+          if-no-files-found: error
+
+      - name: Upload standalone Setup Installer .exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-residual-id-cleaner-setup-exe
+          path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-Setup.exe
           if-no-files-found: error
 
       - name: Upload release bundle and SHA256SUMS.txt artifact

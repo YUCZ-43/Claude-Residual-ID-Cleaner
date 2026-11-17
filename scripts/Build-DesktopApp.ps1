@@ -69,6 +69,15 @@ foreach ($r in $refs) {
     }
 }
 
+$icoPath = Join-Path $resolvedSourceDir 'app.ico'
+if (-not (Test-Path -LiteralPath $icoPath -PathType Leaf)) {
+    $iconGenScript = Join-Path $repoRoot 'scripts\New-AppIcon.ps1'
+    if (Test-Path -LiteralPath $iconGenScript -PathType Leaf) {
+        & $iconGenScript -IconPath $icoPath | Out-Null
+    }
+}
+$manifestPath = Join-Path $resolvedSourceDir 'app.manifest'
+
 $cscArgs = New-Object 'System.Collections.Generic.List[string]'
 $cscArgs.Add('/nologo')
 $cscArgs.Add('/target:winexe')
@@ -76,6 +85,13 @@ $cscArgs.Add('/platform:anycpu')
 $cscArgs.Add('/optimize+')
 $cscArgs.Add('/utf8output')
 $cscArgs.Add('/codepage:65001')
+if (Test-Path -LiteralPath $icoPath -PathType Leaf) {
+    $cscArgs.Add("/win32icon:$icoPath")
+    $cscArgs.Add("/resource:$icoPath,ClaudeResidualIdCleaner.app.ico")
+}
+if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+    $cscArgs.Add("/win32manifest:$manifestPath")
+}
 $cscArgs.Add("/out:$resolvedOutput")
 foreach ($r in $refs) {
     $cscArgs.Add("/reference:$r")

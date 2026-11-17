@@ -5,6 +5,8 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -168,6 +170,10 @@ namespace ClaudeResidualIdCleaner
         public bool HasAccountIdCard;
         public bool HorizontalScrollEnabled;
         public int AccountIdCount;
+        public bool HasWindowIcon;
+        public bool IsElevated;
+        public string PrivilegeBadgeText;
+        public bool HasRestartAdminButton;
     }
 
     public sealed class MainWindow : Window
@@ -212,6 +218,8 @@ namespace ClaudeResidualIdCleaner
         private string _toolkitRoot;
         private readonly bool _dryRun;
         private readonly bool _demoAudit;
+        private readonly bool _isElevated;
+        private bool _hasWindowIcon;
         private int _activeNavIndex;
         private bool _logsExpanded;
         private double _lastLogHeight = 115.0;
@@ -235,7 +243,10 @@ namespace ClaudeResidualIdCleaner
         private TextBlock _lblHeaderTitle;
         private TextBlock _lblVersionBadge;
         private TextBlock _lblSafetyPill;
+        private Border _privilegeBadgeBorder;
+        private TextBlock _lblPrivilegeBadge;
         private TextBlock _lblPositioning;
+        private Button _btnRestartAdmin;
         private Button _btnPolicyPill;
         private Button _btnLangToggle;
         private Button _btnAbout;
@@ -368,6 +379,7 @@ namespace ClaudeResidualIdCleaner
                 : initialLanguage;
             _dryRun = dryRun;
             _demoAudit = demoAudit;
+            _isElevated = IsProcessElevated();
             _activeNavIndex = (initialNavIndex >= 0 && initialNavIndex <= 4) ? initialNavIndex : 0;
             _logsExpanded = demoAudit;
             _toolkitRoot = ResolveToolkitRoot(toolkitRootOverride);
@@ -386,6 +398,7 @@ namespace ClaudeResidualIdCleaner
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
             TextOptions.SetTextRenderingMode(this, TextRenderingMode.Grayscale);
 
+            LoadEmbeddedWindowIcon();
             ApplyDarkResources();
             BuildLayout();
             SizeChanged += OnMainWindowSizeChanged;
@@ -399,6 +412,104 @@ namespace ClaudeResidualIdCleaner
             UpdateMetricCards();
             UpdateAccountIdCard();
             AppendLog("Toolkit root: " + (string.IsNullOrEmpty(_toolkitRoot) ? "<not resolved>" : _toolkitRoot));
+        }
+
+        private static bool IsProcessElevated()
+        {
+            try
+            {
+                using (WindowsIdentity id = WindowsIdentity.GetCurrent())
+                {
+                    if (id == null) return false;
+                    var principal = new WindowsPrincipal(id);
+                    return principal.IsInRole(WindowsBuiltInRole.Administrator);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private Stream OpenIconOrLogoStream(out bool isIcon)
+        {
+            isIcon = true;
+            try
+            {
+                Stream resStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("ClaudeResidualIdCleaner.app.ico");
+                if (resStream != null) return resStream;
+            }
+            catch { }
+
+            if (!string.IsNullOrEmpty(_toolkitRoot))
+            {
+                string diskIco = Path.Combine(_toolkitRoot, @"src\Gui\app.ico");
+                if (File.Exists(diskIco))
+                {
+                    return File.OpenRead(diskIco);
+                }
+                string diskLogo = Path.Combine(_toolkitRoot, @"docs\images\logo.png");
+                if (File.Exists(diskLogo))
+                {
+                    isIcon = false;
+                    return File.OpenRead(diskLogo);
+                }
+            }
+            return null;
+        }
+
+        private void LoadEmbeddedWindowIcon()
+        {
+            try
+            {
+                bool isIcon;
+                using (Stream st = OpenIconOrLogoStream(out isIcon))
+                {
+                    if (st == null) return;
+                    if (isIcon)
+                    {
+                        var dec = new IconBitmapDecoder(st, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                        BitmapFrame best = null;
+                        for (int i = 0; i < dec.Frames.Count; i++)
+                        {
+                            if (best == null || dec.Frames[i].PixelWidth > best.PixelWidth)
+                            {
+                                best = dec.Frames[i];
+                            }
+                        }
+                        if (best != null)
+                        {
+                            best.Freeze();
+                            Icon = best;
+                            _hasWindowIcon = true;
+                        }
+                    }
+                    else
+                    {
+                        var bmp = new BitmapImage();
+                        bmp.BeginInit();
+                        bmp.CacheOption = BitmapCacheOption.OnLoad;
+                        bmp.StreamSource = st;
+                        bmp.EndInit();
+                        bmp.Freeze();
+                        Icon = bmp;
+                        _hasWindowIcon = true;
+                    }
+                }
+            }
+            catch
+            {
+                _hasWindowIcon = false;
+            }
+        }
+
+        private ImageSource LoadMascotImageSource()
+        {
+            if (Icon != null)
+            {
+                return Icon;
+            }
+            return null;
         }
 
         private void OnMainWindowSizeChanged(object sender, SizeChangedEventArgs e)
@@ -790,48 +901,68 @@ namespace ClaudeResidualIdCleaner
             leftDock.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             leftDock.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            // Geometric App Mark Badge
+            // Mascot Logo or Geometric Fallback App Mark
             var appMark = new Border
             {
-                Width = 42,
-                Height = 42,
-                CornerRadius = new CornerRadius(8),
-                Background = BrushAccent,
+                Width = 44,
+                Height = 44,
+                CornerRadius = new CornerRadius(9),
+                Background = BrushBgCard,
                 BorderBrush = BrushAccentBright,
                 BorderThickness = new Thickness(1),
                 Margin = new Thickness(0, 0, 14, 0),
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                ClipToBounds = true
             };
-            var markGrid = new Grid();
-            var shieldPath = new System.Windows.Shapes.Path
+            ImageSource mascotImg = LoadMascotImageSource();
+            if (mascotImg != null)
             {
-                Data = Geometry.Parse("M 12,3 L 20,6.5 L 20,12.5 C 20,17.2 16.6,20.8 12,22.2 C 7.4,20.8 4,17.2 4,12.5 L 4,6.5 Z"),
-                Stroke = Brushes.White,
-                StrokeThickness = 1.8,
-                Fill = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
-                Width = 24,
-                Height = 24,
-                Stretch = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            var checkMark = new System.Windows.Shapes.Path
+                var logoImage = new Image
+                {
+                    Source = mascotImg,
+                    Width = 42,
+                    Height = 42,
+                    Stretch = Stretch.Uniform,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                RenderOptions.SetBitmapScalingMode(logoImage, BitmapScalingMode.HighQuality);
+                appMark.Child = logoImage;
+            }
+            else
             {
-                Data = Geometry.Parse("M 8.5,12.5 L 11,15 L 16,9.5"),
-                Stroke = BrushSafetyFg,
-                StrokeThickness = 2.0,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round,
-                StrokeLineJoin = PenLineJoin.Round,
-                Width = 24,
-                Height = 24,
-                Stretch = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            markGrid.Children.Add(shieldPath);
-            markGrid.Children.Add(checkMark);
-            appMark.Child = markGrid;
+                appMark.Background = BrushAccent;
+                var markGrid = new Grid();
+                var shieldPath = new System.Windows.Shapes.Path
+                {
+                    Data = Geometry.Parse("M 12,3 L 20,6.5 L 20,12.5 C 20,17.2 16.6,20.8 12,22.2 C 7.4,20.8 4,17.2 4,12.5 L 4,6.5 Z"),
+                    Stroke = Brushes.White,
+                    StrokeThickness = 1.8,
+                    Fill = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
+                    Width = 24,
+                    Height = 24,
+                    Stretch = Stretch.Uniform,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                var checkMark = new System.Windows.Shapes.Path
+                {
+                    Data = Geometry.Parse("M 8.5,12.5 L 11,15 L 16,9.5"),
+                    Stroke = BrushSafetyFg,
+                    StrokeThickness = 2.0,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round,
+                    StrokeLineJoin = PenLineJoin.Round,
+                    Width = 24,
+                    Height = 24,
+                    Stretch = Stretch.Uniform,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                markGrid.Children.Add(shieldPath);
+                markGrid.Children.Add(checkMark);
+                appMark.Child = markGrid;
+            }
             Grid.SetColumn(appMark, 0);
             leftDock.Children.Add(appMark);
 
@@ -889,7 +1020,7 @@ namespace ClaudeResidualIdCleaner
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(11),
                 Padding = new Thickness(10, 2, 10, 2),
-                Margin = new Thickness(0, 2, 0, 2),
+                Margin = new Thickness(0, 2, 8, 2),
                 VerticalAlignment = VerticalAlignment.Center
             };
             _lblSafetyPill = new TextBlock
@@ -900,10 +1031,29 @@ namespace ClaudeResidualIdCleaner
             };
             safetyBorder.Child = _lblSafetyPill;
 
+            _privilegeBadgeBorder = new Border
+            {
+                Background = _isElevated ? BrushBadgeReadyBg : BrushBgCard,
+                BorderBrush = _isElevated ? BrushBadgeReadyBorder : BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(11),
+                Padding = new Thickness(9, 2, 9, 2),
+                Margin = new Thickness(0, 2, 0, 2),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            _lblPrivilegeBadge = new TextBlock
+            {
+                Foreground = _isElevated ? BrushBadgeReadyFg : BrushTextSecondary,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold
+            };
+            _privilegeBadgeBorder.Child = _lblPrivilegeBadge;
+
             titleRow.Children.Add(brandPill);
             titleRow.Children.Add(_lblHeaderTitle);
             titleRow.Children.Add(versionBorder);
             titleRow.Children.Add(safetyBorder);
+            titleRow.Children.Add(_privilegeBadgeBorder);
 
             _lblPositioning = new TextBlock
             {
@@ -918,13 +1068,27 @@ namespace ClaudeResidualIdCleaner
             Grid.SetColumn(titleStack, 1);
             leftDock.Children.Add(titleStack);
 
-            // Right: Policy Quick Pill + Language Toggle + Safety/About
+            // Right: On-Demand Admin Restart + Policy Quick Pill + Language Toggle + Safety/About
             var rightControls = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(14, 0, 0, 0)
             };
+
+            _btnRestartAdmin = new Button
+            {
+                Background = BrushBgCard,
+                BorderBrush = BrushBadgeReadyBorder,
+                BorderThickness = new Thickness(1),
+                Foreground = BrushBadgeReadyFg,
+                FontSize = 11.5,
+                FontWeight = FontWeights.SemiBold,
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(0, 0, 8, 0),
+                Visibility = _isElevated ? Visibility.Collapsed : Visibility.Visible
+            };
+            _btnRestartAdmin.Click += OnRestartAsAdminClick;
 
             _btnPolicyPill = new Button
             {
@@ -964,6 +1128,7 @@ namespace ClaudeResidualIdCleaner
             };
             _btnAbout.Click += OnAboutClick;
 
+            rightControls.Children.Add(_btnRestartAdmin);
             rightControls.Children.Add(_btnPolicyPill);
             rightControls.Children.Add(_btnLangToggle);
             rightControls.Children.Add(_btnAbout);
@@ -1991,6 +2156,52 @@ namespace ClaudeResidualIdCleaner
             var s = Localization.GetStrings(_lang);
             RelocalizeExistingRows(s);
             UpdatePlanCleanVerifyCards();
+            if (!_isElevated && _rbFullRemoval != null && _rbFullRemoval.IsChecked == true)
+            {
+                AppendLog("[INFO] " + s["ElevationHintFullRemoval"]);
+            }
+        }
+
+        private void OnRestartAsAdminClick(object sender, RoutedEventArgs e)
+        {
+            var s = Localization.GetStrings(_lang);
+            if (_isElevated || _dryRun)
+            {
+                return;
+            }
+            MessageBoxResult choice = MessageBox.Show(
+                this,
+                s["RestartAdminPrompt"],
+                s["RestartAdminTitle"],
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.No);
+            if (choice != MessageBoxResult.Yes)
+            {
+                return;
+            }
+            try
+            {
+                string exePath = Assembly.GetExecutingAssembly().Location;
+                if (string.IsNullOrEmpty(exePath))
+                {
+                    exePath = Process.GetCurrentProcess().MainModule.FileName;
+                }
+                var psi = new ProcessStartInfo
+                {
+                    FileName = exePath,
+                    Arguments = "--language " + _lang,
+                    UseShellExecute = true,
+                    Verb = "runas"
+                };
+                Process.Start(psi);
+                Close();
+            }
+            catch (Exception ex)
+            {
+                AppendLog("[WARN] " + string.Format(s["RestartAdminFailed"], ex.Message));
+                MessageBox.Show(this, string.Format(s["RestartAdminFailed"], ex.Message), Title, MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
 
         private void UpdatePolicyPillText()
@@ -2176,7 +2387,9 @@ namespace ClaudeResidualIdCleaner
             _lblHeaderTitle.Text = s["HeaderTitle"];
             _lblVersionBadge.Text = s["VersionBadge"];
             _lblSafetyPill.Text = s["SafetyPill"];
+            _lblPrivilegeBadge.Text = _isElevated ? s["PrivilegeAdmin"] : s["PrivilegeStandard"];
             _lblPositioning.Text = s["Positioning"];
+            _btnRestartAdmin.Content = s["BtnRestartAdmin"];
             _btnLangToggle.Content = s["LangButton"];
             _btnAbout.Content = s["AboutButton"];
             UpdatePolicyPillText();
@@ -2464,7 +2677,11 @@ namespace ClaudeResidualIdCleaner
                 HasGridSplitter = (_logSplitter != null),
                 HasAccountIdCard = (_accountIdCard != null && _btnCopyAccountId != null),
                 HorizontalScrollEnabled = (_gridResults != null && _gridResults.HorizontalScrollBarVisibility == ScrollBarVisibility.Auto),
-                AccountIdCount = _accountIdRecords.Count
+                AccountIdCount = _accountIdRecords.Count,
+                HasWindowIcon = _hasWindowIcon,
+                IsElevated = _isElevated,
+                PrivilegeBadgeText = (_lblPrivilegeBadge != null) ? _lblPrivilegeBadge.Text : string.Empty,
+                HasRestartAdminButton = (_btnRestartAdmin != null)
             };
         }
 

@@ -1,8 +1,12 @@
 简体中文 | [English](README.en.md) | [跨代理 Skill 实战指南](docs/Skills-Usage-Guide.md) | [Skill Guide (EN)](docs/Skills-Usage-Guide.en.md)
 
+<p align="center">
+  <img src="docs/images/logo.png" width="136" alt="claude-cleanup Mascot Logo" />
+</p>
+
 # claude-cleanup (`Claude 账号残余 ID 清理工具 / Claude Residual ID Cleaner`)
 
-**claude-cleanup**（桌面应用：**Claude 账号残余 ID 清理工具 / Claude Residual ID Cleaner**）是一套面向 Windows 用户的非破坏性独立桌面软件（`Claude-Residual-ID-Cleaner.exe`）与原生 PowerShell 清理工具集，专为扫描并安全清理 Claude 封号后残留在本地设备中的账号/设备 ID、认证 Token 与会话缓存而设计，**绝不改动 Windows 操作系统本身**。
+**claude-cleanup**（桌面应用：**Claude 账号残余 ID 清理工具 / Claude Residual ID Cleaner**）是一套面向 Windows 用户的非破坏性独立桌面软件（绿色单文件版 `Claude-Residual-ID-Cleaner.exe` / 标准安装向导版 `Claude-Residual-ID-Cleaner-Setup.exe`）与原生 PowerShell 清理工具集，专为扫描并安全清理 Claude 封号后残留在本地设备中的账号/设备 ID（含只读提取非敏感 `accountUuid` / `organizationUuid` / `userId` / `deviceId`）、认证 Token 与会话缓存而设计，**绝不改动 Windows 操作系统本身**。
 
 ![Claude 账号残余 ID 清理工具桌面端主界面（简体中文）](docs/images/ui-main-zh.png)
 
@@ -56,33 +60,36 @@
 - **PowerShell**：原生兼容 **Windows PowerShell 5.1**（`powershell.exe`，系统内置）与 **PowerShell 7+**（`pwsh.exe`）。
 - **独立运行**：零第三方 PowerShell 模块、零外部二进制依赖，无需 Git 或 REA 运行时依赖。
 
-### 3.2 方式一：独立 Windows 桌面应用（`Claude-Residual-ID-Cleaner.exe`，无控制台黑框）
+### 3.2 方式一：独立 Windows 桌面应用（无控制台黑框 · 按需提权）
 
-#### 获取与免编译直接运行（GitHub Releases / GitHub Actions Artifacts）
+#### 两种获取方式对比（GitHub Releases / GitHub Actions Artifacts）
 
-普通 Windows 用户无需安装开发工具或手动编译：
+| 版本形态 | 适用场景 | 权限与安装行为 | 启动与卸载方式 |
+| :--- | :--- | :--- | :--- |
+| **标准安装向导版 (`Claude-Residual-ID-Cleaner-Setup.exe`)** | 希望一键安装桌面/开始菜单快捷方式、并可在 Windows“应用和功能”中规范卸载的普通用户 | 默认安装至 `%LOCALAPPDATA%\Programs\claude-cleanup`（**标准用户免 UAC**）；若以管理员运行则默认安装至 `C:\Program Files\claude-cleanup` | 下载 `claude-residual-id-cleaner-setup-exe` 后双击按向导安装；支持从 Windows 设置“应用和功能”一键卸载（保留审计报告与 Claude 数据） |
+| **绿色单文件版 (`Claude-Residual-ID-Cleaner.exe` + `claude-cleanup-<Version>.zip`)** | 偏好免安装便携运行、U 盘携带或直接校验源码随包脚本的工程用户 | 无任何系统安装写入与注册表登记；内置 `asInvoker` 清单，**启动绝不强制弹出 UAC** | 下载 `claude-cleanup-release-bundle` 解压至任意本地目录后，**直接双击 `Claude-Residual-ID-Cleaner.exe`** 即可运行（或下载单文件 `.exe` 放入含 `ClaudeCleanup.ps1` 的根目录） |
 
-1. 前往仓库 **GitHub Releases** 页面，或打开最新 **GitHub Actions** CI 运行记录底部的 **Artifacts** 区域：
-   - **完整发布归档（推荐）**：下载 `claude-cleanup-release-bundle`（内含 `claude-cleanup-<Version>.zip` 与 `SHA256SUMS.txt`）。归档根目录已直接打包 `Claude-Residual-ID-Cleaner.exe` 与核心引擎 `ClaudeCleanup.ps1`。
-   - **单文件桌面应用**：也可单独下载 `claude-residual-id-cleaner-exe`（内含 `Claude-Residual-ID-Cleaner.exe`），需将其置于包含 `ClaudeCleanup.ps1` 的工具根目录（或 `dist\` 子目录）下运行。
-2. 校验压缩包 SHA-256（可选但推荐）：
-   ```powershell
-   Get-FileHash .\claude-cleanup-0.1.0.zip -Algorithm SHA256
-   ```
-3. 将 `claude-cleanup-<Version>.zip` 解压至任意本地目录后，**直接双击 `Claude-Residual-ID-Cleaner.exe`** 即可启动原生 WPF 桌面工作台（零控制台黑框）。
+#### 按需管理员提权说明（Never Forced UAC）
 
-#### 本地离线编译与打包（从源码构建）
+- **默认标准权限运行**：桌面端与安装向导均嵌入标准 `asInvoker` 清单。绝大部分用户目录清理（`.claude`、`%APPDATA%\Claude`、`HKCU` 浏览器宿主键等）无需管理员权限即可直接完成。
+- **顶部权限状态徽章与按需重启**：窗口顶部实时显示当前权限状态（`标准权限` / `管理员权限`）；仅当用户选择清理受权限保护的机器级或系统锁定位点时，才可由用户主动点击右上角 **“以管理员身份重启”**（确认后通过 `runas` 触发一次 UAC），绝不擅自强制提权。
 
-源码位于 [src/Gui/](src/Gui/)，直接利用 Windows 10/11 内置 `.NET Framework 4.x` 编译器（`csc.exe`）离线生成单文件纯 GUI 可执行程序（`IMAGE_SUBSYSTEM_WINDOWS_GUI`）：
+#### 校验 SHA-256 与从源码离线编译打包
 
 ```powershell
-# 1. 本地离线编译生成单文件桌面应用 -> .\dist\Claude-Residual-ID-Cleaner.exe
+# 1. （可选）校验下载压缩包 SHA-256
+Get-FileHash .\claude-cleanup-0.1.0.zip -Algorithm SHA256
+
+# 2. 从源码生成多分辨率吉祥物图标 (docs/images/logo.png -> src/Gui/app.ico)
+.\scripts\New-AppIcon.ps1
+
+# 3. 本地离线编译绿色单文件桌面应用 -> .\dist\Claude-Residual-ID-Cleaner.exe
 .\scripts\Build-DesktopApp.ps1
 
-# 2. 启动独立桌面软件
-.\dist\Claude-Residual-ID-Cleaner.exe
+# 4. 本地离线编译独立双语安装向导 -> .\dist\Claude-Residual-ID-Cleaner-Setup.exe
+.\scripts\Build-Installer.ps1
 
-# 3. （可选）生成包含 Claude-Residual-ID-Cleaner.exe 的发布压缩包与 SHA256SUMS.txt
+# 5. （可选）生成包含便携 .exe 与 SHA256SUMS.txt 的发布压缩包
 .\scripts\New-ReleasePackage.ps1
 ```
 

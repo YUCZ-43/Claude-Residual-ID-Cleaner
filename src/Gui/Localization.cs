@@ -120,6 +120,13 @@ namespace ClaudeResidualIdCleaner
                 d["SafetyCard3Body"] = "账号 ID 卡片仅读取非敏感 UUID 元数据；Windows 凭据管理器仅报告 Claude* 目标计数，环境变量仅报告变量名称，绝不读取 OAuth Token 或密钥原文。";
                 d["SafetyCard4Title"] = "4. 版本与开源项目信息";
                 d["SafetyCard4Body"] = "产品名称：claude-cleanup (Claude Residual ID Cleaner) v1.0.0.0\r\n运行架构：.NET Framework 4.x 原生 WPF 零控制台桌面端 (IMAGE_SUBSYSTEM_WINDOWS_GUI)\r\n项目仓库：https://github.com/YUCZ-43/claude-cleanup\r\n核心定位：仅清理 Claude 封号残余数据 · 绝不改动 Windows 系统本身";
+                d["PrivilegeStandard"] = "标准权限";
+                d["PrivilegeAdmin"] = "管理员权限";
+                d["BtnRestartAdmin"] = "以管理员身份重启";
+                d["RestartAdminTitle"] = "按需管理员提权确认";
+                d["RestartAdminPrompt"] = "当前用户目录下的 Claude 残余清理无需管理员权限。\r\n\r\n仅当需要清理机器级注册表、系统级安装或权限受限项时才需要管理员权限。\r\n确定要触发 Windows UAC 并以管理员身份重启本程序吗？";
+                d["RestartAdminFailed"] = "未完成管理员提权重启（已取消或被系统拦截）：{0}";
+                d["ElevationHintFullRemoval"] = "提示：当前为标准权限，个人目录清理无需提权；若需处理系统级受保护残余，可按需点击右上角“以管理员身份重启”。";
                 d["BtnBackToWorkspace"] = "返回扫描工作台";
                 d["FooterBoundary"] = "安全边界：仅限白名单 Claude 残余 · 绝不改动 Windows 系统";
                 d["DemoPlanNotice"] = "当前处于 --demo-audit 演示模式，仅展示只读模拟清单，不会写入真实 CLEANUP-PLAN.md 或执行删除。";
@@ -253,6 +260,13 @@ namespace ClaudeResidualIdCleaner
                 d["SafetyCard3Body"] = "Account ID card reads non-secret UUID metadata only; Credential Manager reports counts only, env vars emit names only — OAuth tokens and secrets are never read.";
                 d["SafetyCard4Title"] = "4. Version & Repository Information";
                 d["SafetyCard4Body"] = "Product: claude-cleanup (Claude Residual ID Cleaner) v1.0.0.0\r\nRuntime: Native .NET Framework 4.x WPF Zero-Console App (IMAGE_SUBSYSTEM_WINDOWS_GUI)\r\nRepository: https://github.com/YUCZ-43/claude-cleanup\r\nPositioning: Cleans Claude Banned-Account Residuals Only · Never Alters Windows OS";
+                d["PrivilegeStandard"] = "Standard User";
+                d["PrivilegeAdmin"] = "Administrator";
+                d["BtnRestartAdmin"] = "Restart as Admin";
+                d["RestartAdminTitle"] = "On-Demand Administrator Elevation";
+                d["RestartAdminPrompt"] = "Standard user-profile Claude residual cleanup works without Administrator privileges.\r\n\r\nOnly machine-wide items or ACL-protected residuals require elevation.\r\nTrigger Windows UAC and restart this app as Administrator now?";
+                d["RestartAdminFailed"] = "Administrator restart did not complete (cancelled or blocked): {0}";
+                d["ElevationHintFullRemoval"] = "Tip: Running as Standard User. User-profile cleanup needs no elevation; click 'Restart as Admin' only if machine-level residuals require it.";
                 d["BtnBackToWorkspace"] = "Back to Scan Workspace";
                 d["FooterBoundary"] = "Boundary: Allowlisted Claude residuals only · Never Alters Windows OS";
                 d["DemoPlanNotice"] = "Demo audit mode (--demo-audit) active: simulates read-only discovery only; no real CLEANUP-PLAN.md write or deletion.";

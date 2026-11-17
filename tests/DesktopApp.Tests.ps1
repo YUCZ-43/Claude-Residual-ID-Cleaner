@@ -3,9 +3,17 @@ Set-StrictMode -Version 2.0
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildScript = Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1'
+$iconScript = Join-Path $repoRoot 'scripts\New-AppIcon.ps1'
+$installerBuildScript = Join-Path $repoRoot 'scripts\Build-Installer.ps1'
 $locCs = Join-Path $repoRoot 'src\Gui\Localization.cs'
 $progCs = Join-Path $repoRoot 'src\Gui\Program.cs'
 $asmInfoCs = Join-Path $repoRoot 'src\Gui\AssemblyInfo.cs'
+$appIcoPath = Join-Path $repoRoot 'src\Gui\app.ico'
+$appManifestPath = Join-Path $repoRoot 'src\Gui\app.manifest'
+$logoPngPath = Join-Path $repoRoot 'docs\images\logo.png'
+$setupCs = Join-Path $repoRoot 'src\Installer\SetupProgram.cs'
+$setupAsmCs = Join-Path $repoRoot 'src\Installer\SetupAssemblyInfo.cs'
+$setupManifestPath = Join-Path $repoRoot 'src\Installer\app.manifest'
 
 $sandboxRoot = Join-Path $PSScriptRoot 'sandbox'
 $sandboxExisted = Test-Path -LiteralPath $sandboxRoot
@@ -50,19 +58,44 @@ function Get-PeSubsystemType {
 }
 
 try {
-    # 1. Source & build script existence and AST parse checks
-    Assert-True ((Test-Path -LiteralPath $buildScript -PathType Leaf) -and (Test-Path -LiteralPath $locCs -PathType Leaf) -and (Test-Path -LiteralPath $progCs -PathType Leaf) -and (Test-Path -LiteralPath $asmInfoCs -PathType Leaf)) 'Desktop GUI source files (incl. AssemblyInfo.cs) and Build-DesktopApp.ps1 exist'
+    Add-Type -AssemblyName PresentationCore, System.Drawing
 
-    foreach ($psFile in @($buildScript, $PSCommandPath)) {
+    # 1. Source & build script existence and AST parse checks
+    Assert-True (
+        (Test-Path -LiteralPath $buildScript -PathType Leaf) -and
+        (Test-Path -LiteralPath $iconScript -PathType Leaf) -and
+        (Test-Path -LiteralPath $installerBuildScript -PathType Leaf) -and
+        (Test-Path -LiteralPath $locCs -PathType Leaf) -and
+        (Test-Path -LiteralPath $progCs -PathType Leaf) -and
+        (Test-Path -LiteralPath $asmInfoCs -PathType Leaf) -and
+        (Test-Path -LiteralPath $appIcoPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $appManifestPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $logoPngPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $setupCs -PathType Leaf) -and
+        (Test-Path -LiteralPath $setupAsmCs -PathType Leaf) -and
+        (Test-Path -LiteralPath $setupManifestPath -PathType Leaf)
+    ) 'Desktop GUI, icon, manifest, and Setup Installer source/build files exist'
+
+    foreach ($psFile in @($buildScript, $iconScript, $installerBuildScript, $PSCommandPath)) {
         $errs = $null
         $null = [System.Management.Automation.Language.Parser]::ParseFile($psFile, [ref]$null, [ref]$errs)
         Assert-True (@($errs).Count -eq 0) "AST parse has 0 syntax errors for $([IO.Path]::GetFileName($psFile))"
     }
 
-    # 2. Static security & localization completeness checks on C# sources
+    # 2. Static security, manifest asInvoker, & localization completeness checks on C# sources
     $locText = [IO.File]::ReadAllText($locCs, [System.Text.Encoding]::UTF8)
     $progText = [IO.File]::ReadAllText($progCs, [System.Text.Encoding]::UTF8)
     $asmInfoText = [IO.File]::ReadAllText($asmInfoCs, [System.Text.Encoding]::UTF8)
+    $appManText = [IO.File]::ReadAllText($appManifestPath, [System.Text.Encoding]::UTF8)
+    $setupText = [IO.File]::ReadAllText($setupCs, [System.Text.Encoding]::UTF8)
+    $setupManText = [IO.File]::ReadAllText($setupManifestPath, [System.Text.Encoding]::UTF8)
+
+    Assert-True (
+        ($appManText -match 'level="asInvoker"') -and
+        ($appManText -notmatch 'requireAdministrator') -and
+        ($setupManText -match 'level="asInvoker"') -and
+        ($setupManText -notmatch 'requireAdministrator')
+    ) 'Desktop and Setup manifests strictly enforce asInvoker (never force UAC on startup)'
 
     Assert-True (
         ($asmInfoText -match 'AssemblyProduct\("claude-cleanup"\)') -and
@@ -79,15 +112,20 @@ try {
         ($progText -match 'GridSplitter') -and
         ($progText -match 'HorizontalScrollBarVisibility\s*=\s*ScrollBarVisibility\.Auto') -and
         ($progText -match '_chkSelectAll') -and
-        ($progText -match 'ResidualAccountIdRecord')
-    ) 'Desktop WPF source defines Adobe dark palette, SaveFileDialog, GridSplitter, HorizontalScrollBarVisibility, SelectAll, and Account ID card'
+        ($progText -match 'ResidualAccountIdRecord') -and
+        ($progText -match '_btnRestartAdmin') -and
+        ($progText -match '_lblPrivilegeBadge')
+    ) 'Desktop WPF source defines Adobe dark palette, Stage K controls, privilege badge, and on-demand admin restart button'
 
+    $runasMatches = [regex]::Matches($progText, '(?i)Verb\s*=\s*"runas"')
     Assert-True (
-        ($progText -notmatch 'ExecutionPolicy\s*(Bypass|Unrestricted)|RegDeleteKeyW|SetFileInformationByHandle|NtDeleteKey|Remove-Item|Verb\s*=\s*"RunAs"') -and
+        ($progText -notmatch 'ExecutionPolicy\s*(Bypass|Unrestricted)|RegDeleteKeyW|SetFileInformationByHandle|NtDeleteKey|Remove-Item') -and
+        ($runasMatches.Count -eq 1) -and
+        ($progText -match 'OnRestartAsAdminClick[\s\S]{0,1200}MessageBox\.Show[\s\S]{0,1200}Verb\s*=\s*"runas"') -and
         ($progText -match 'ClaudeCleanup\.ps1') -and
         ($progText -match '"-WhatIf"') -and
         ($progText -match '_btnClean\.IsEnabled\s*=\s*false')
-    ) 'Desktop WPF source duplicates zero deletion APIs, has no bypass/elevation, disables Clean initially, and mandates -WhatIf'
+    ) 'Desktop WPF source duplicates zero deletion APIs, has no bypass, gates runas strictly behind explicit OnRestartAsAdminClick prompt, disables Clean initially, and mandates -WhatIf'
 
     $zhMatches = [regex]::Matches($locText.Split(@('else'), [System.StringSplitOptions]::None)[0], 'd\["([^"]+)"\]\s*=')
     $enMatches = [regex]::Matches($locText.Split(@('else'), [System.StringSplitOptions]::None)[1], 'd\["([^"]+)"\]\s*=')
@@ -100,22 +138,46 @@ try {
         ($locText -match 'Never Alters Windows OS') -and
         (-not $locText.Contains([char]0xFFFD)) -and
         (-not $progText.Contains([char]0xFFFD)) -and
-        (-not $asmInfoText.Contains([char]0xFFFD))
+        (-not $asmInfoText.Contains([char]0xFFFD)) -and
+        (-not $setupText.Contains([char]0xFFFD))
     ) 'Bilingual positioning promise present in zh-CN & en-US without UTF-8 replacement characters'
 
-    $combinedCs = $locText + "`n" + $progText + "`n" + $asmInfoText
+    $combinedCs = $locText + "`n" + $progText + "`n" + $asmInfoText + "`n" + $setupText
     $sidPattern = 'S-1-5-21-' + '\d+-\d+-\d+-\d+'
     $userPathPattern = '(?i)C:\\Users\\(?!(?:<USERNAME>|<USER>|<name>|username|user|example|Public|Default)(?:[\\"`\s]|$))[A-Za-z0-9._-]+\\'
-    Assert-True (($combinedCs -notmatch $sidPattern) -and ($combinedCs -notmatch $userPathPattern)) 'Desktop C# sources contain zero local user paths or Windows SIDs'
+    Assert-True (($combinedCs -notmatch $sidPattern) -and ($combinedCs -notmatch $userPathPattern)) 'Desktop & Setup C# sources contain zero local user paths or Windows SIDs'
+
+    # 2b. Verify New-AppIcon.ps1 produces valid multi-resolution .ico (16, 32, 48, 256) and fallback programmatic PNG inside sandbox
+    $icoFromLogo = Join-Path $appSandbox 'from-logo.ico'
+    $icoFallbackPng = Join-Path $appSandbox 'fallback-logo.png'
+    $icoFallbackIco = Join-Path $appSandbox 'fallback.ico'
+    $icoRes1 = & $iconScript -LogoPngPath $logoPngPath -IconPath $icoFromLogo
+    $icoRes2 = & $iconScript -LogoPngPath $icoFallbackPng -IconPath $icoFallbackIco -ForceRegenerate
+    $fsIco = [IO.File]::OpenRead($icoFromLogo)
+    try {
+        $icoDec = New-Object System.Windows.Media.Imaging.IconBitmapDecoder($fsIco, 'PreservePixelFormat', 'Default')
+        $frameDims = @($icoDec.Frames | ForEach-Object { "$($_.PixelWidth)x$($_.PixelHeight)" })
+    } finally {
+        $fsIco.Dispose()
+    }
+    Assert-True (
+        $icoRes1.Succeeded -and $icoRes2.Succeeded -and $icoRes2.GeneratedLogo -and
+        (Test-Path -LiteralPath $icoFallbackPng -PathType Leaf) -and
+        ($frameDims -contains '16x16') -and ($frameDims -contains '32x32') -and ($frameDims -contains '48x48') -and ($frameDims -contains '256x256')
+    ) 'New-AppIcon.ps1 builds multi-resolution .ico (16, 32, 48, 256) from logo.png and supports programmatic mascot fallback'
 
     # 3. Compile standalone zero-console WPF .exe inside tests/sandbox/desktop-app/
     $sandboxExe = Join-Path $appSandbox 'Claude-Residual-ID-Cleaner.exe'
     $buildRes = & $buildScript -SourceDir (Join-Path $repoRoot 'src\Gui') -OutputPath $sandboxExe
     Assert-True ($buildRes.Succeeded -and (Test-Path -LiteralPath $sandboxExe -PathType Leaf) -and $buildRes.SizeBytes -gt 10000 -and $buildRes.Sha256 -match '^[a-f0-9]{64}$') 'Build-DesktopApp.ps1 compiles standalone Claude-Residual-ID-Cleaner.exe cleanly inside sandbox'
 
-    # 4. Verify PE subsystem == 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI -> zero black console window)
+    # 4. Verify PE subsystem == 2, Win32 icon resource embedded, and asInvoker manifest embedded
     $subsys = Get-PeSubsystemType -ExePath $sandboxExe
-    Assert-True ($subsys -eq 2) "Compiled .exe uses Windows GUI subsystem (PE Subsystem=$subsys; no console window)"
+    $assocIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($sandboxExe)
+    $hasAssocIcon = ($null -ne $assocIcon -and $assocIcon.Width -gt 0)
+    if ($null -ne $assocIcon) { $assocIcon.Dispose() }
+    $exeTextUtf8 = [System.Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($sandboxExe))
+    Assert-True ($subsys -eq 2 -and $hasAssocIcon -and ($exeTextUtf8 -match 'level="asInvoker"')) "Compiled .exe uses Windows GUI subsystem ($subsys), embeds PE icon, and embeds asInvoker manifest"
 
     # 5. Execute compiled .exe in non-destructive headless self-test mode (zh-CN -> en-US live toggle)
     $outZh = Join-Path $appSandbox 'selftest-zh.json'
@@ -135,12 +197,15 @@ try {
         $jZh.HasGridSplitter -and
         $jZh.HasAccountIdCard -and
         $jZh.HorizontalScrollEnabled -and
+        $jZh.HasWindowIcon -and
+        $jZh.HasRestartAdminButton -and
+        (-not [string]::IsNullOrWhiteSpace($jZh.PrivilegeBadgeText)) -and
         (-not $jZh.InitialCleanButtonEnabled) -and
         $jZh.BackendFound -and
         $jZh.DryRun -and
         ($jZh.InitialSafetyPill -match '绝不改动 Windows 系统') -and
         ($jZh.ToggledSafetyPill -match 'Never Alters Windows OS')
-    ) 'Compiled WPF .exe validates zh-CN default, AdobeDarkSlate (5 nav tabs, 4 metric cards), live switch, 5 checklist items, 5 DataGrid columns, and disabled Clean button'
+    ) 'Compiled WPF .exe validates zh-CN default, mascot Window.Icon, privilege badge, on-demand admin button, AdobeDarkSlate layout, and disabled Clean button'
 
     # 6. Execute compiled .exe reverse toggle (en-US -> zh-CN)
     $outEn = Join-Path $appSandbox 'selftest-en.json'
@@ -182,7 +247,51 @@ try {
     $pDemo = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --demo-audit --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$outDemo`"")
     $pDemo.WaitForExit()
     $jDemo = [IO.File]::ReadAllText($outDemo, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-    Assert-True ($pDemo.ExitCode -eq 0 -and $jDemo.AccountIdCount -eq 3 -and $jDemo.HasAccountIdCard -and $jDemo.HasGridSplitter -and $jDemo.HorizontalScrollEnabled) 'Compiled WPF .exe --demo-audit populates 3 mock residual Account/Org/Device IDs alongside Stage K controls'
+    Assert-True ($pDemo.ExitCode -eq 0 -and $jDemo.AccountIdCount -eq 3 -and $jDemo.HasAccountIdCard -and $jDemo.HasGridSplitter -and $jDemo.HorizontalScrollEnabled -and $jDemo.HasWindowIcon) 'Compiled WPF .exe --demo-audit populates 3 mock residual Account/Org/Device IDs alongside Stage K/L controls'
+
+    # 9. Compile standalone Claude-Residual-ID-Cleaner-Setup.exe inside sandbox and verify headless install-uninstall roundtrip
+    $sandboxSetupExe = Join-Path $appSandbox 'Claude-Residual-ID-Cleaner-Setup.exe'
+    $setupBuildRes = & $installerBuildScript -SourceDir (Join-Path $repoRoot 'src\Installer') -GuiSourceDir (Join-Path $repoRoot 'src\Gui') -OutputPath $sandboxSetupExe -DesktopExePath $sandboxExe -Version '0.1.0-test'
+    $setupSubsys = Get-PeSubsystemType -ExePath $sandboxSetupExe
+    $setupIcon = [System.Drawing.Icon]::ExtractAssociatedIcon($sandboxSetupExe)
+    $hasSetupPeIcon = ($null -ne $setupIcon -and $setupIcon.Width -gt 0)
+    if ($null -ne $setupIcon) { $setupIcon.Dispose() }
+    Assert-True ($setupBuildRes.Succeeded -and (Test-Path -LiteralPath $sandboxSetupExe -PathType Leaf) -and $setupSubsys -eq 2 -and $hasSetupPeIcon) 'Build-Installer.ps1 compiles standalone Claude-Residual-ID-Cleaner-Setup.exe cleanly with GUI subsystem and embedded icon'
+
+    $setupInstallTarget = Join-Path $appSandbox 'setup-install-target'
+    $setupDesktopDir = Join-Path $appSandbox 'setup-desktop'
+    $setupStartMenuDir = Join-Path $appSandbox 'setup-startmenu'
+    $setupRegJson = Join-Path $appSandbox 'setup-reg.json'
+    $setupInstOut = Join-Path $appSandbox 'setup-install-selftest.json'
+    $setupUninstOut = Join-Path $appSandbox 'setup-uninstall-selftest.json'
+
+    $pSetupInst = [System.Diagnostics.Process]::Start($sandboxSetupExe, "--headless --no-registry --install-dir `"$setupInstallTarget`" --desktop-dir `"$setupDesktopDir`" --start-menu-dir `"$setupStartMenuDir`" --reg-out `"$setupRegJson`" --self-test `"$setupInstOut`"")
+    $pSetupInst.WaitForExit()
+    $jSetupInst = [IO.File]::ReadAllText($setupInstOut, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $jSetupReg = [IO.File]::ReadAllText($setupRegJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-True (
+        $pSetupInst.ExitCode -eq 0 -and
+        $jSetupInst.Succeeded -and
+        $jSetupInst.HasWindowIcon -and
+        $jSetupReg.SkippedLiveRegistryWrite -and
+        ($jSetupReg.UninstallString -match '--uninstall') -and
+        (Test-Path -LiteralPath (Join-Path $setupInstallTarget 'Claude-Residual-ID-Cleaner.exe') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $setupInstallTarget 'ClaudeCleanup.ps1') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $setupDesktopDir 'Claude Residual ID Cleaner.lnk') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall claude-cleanup.lnk') -PathType Leaf)
+    ) 'Compiled Setup .exe completes sandboxed install with payload, shortcuts, manifest, and zero live registry writes'
+
+    $pSetupUninst = [System.Diagnostics.Process]::Start($sandboxSetupExe, "--headless --uninstall --no-registry --install-dir `"$setupInstallTarget`" --self-test `"$setupUninstOut`"")
+    $pSetupUninst.WaitForExit()
+    $jSetupUninst = [IO.File]::ReadAllText($setupUninstOut, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-True (
+        $pSetupUninst.ExitCode -eq 0 -and
+        $jSetupUninst.Succeeded -and
+        $jSetupUninst.RemovedFileCount -ge 40 -and
+        (-not (Test-Path -LiteralPath $setupInstallTarget)) -and
+        (-not (Test-Path -LiteralPath (Join-Path $setupDesktopDir 'Claude Residual ID Cleaner.lnk'))) -and
+        (-not (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall claude-cleanup.lnk')))
+    ) 'Compiled Setup .exe completes sandboxed uninstall removing managed files and shortcuts cleanly'
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; $($failedList.Count) failed"
     if ($failedList.Count -gt 0) { exit 1 }
