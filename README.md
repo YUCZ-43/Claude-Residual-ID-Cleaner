@@ -12,20 +12,21 @@ Windows Claude Cleanup inspects known local installations, configurations, cache
 
 ## 2. Current Release Status
 
-- **Stage**: Pre-release / Active Security Hardening (P0 security remediation completed and undergoing acceptance review).
+- **Stage**: Pre-release / Active Development (P0 security remediation and Windows cleanup coverage expansion complete; undergoing acceptance review).
 - **Real Cleanup Status**: No real Claude data cleanup has been authorized or executed during development.
 - **Repository Visibility**: Private development repository (`main` branch).
 
 ## 3. Features and Limitations
 
 ### Implemented Capabilities
-- Read-only system audit (`-Audit`) across Claude Code CLI, Claude Desktop, VS Code extensions, MSIX packages, Windows services/scheduled tasks, environment variables, `PATH`, Credential Manager target counts (no secret values read), and read-only WSL reporting.
+- Read-only system audit (`-Audit`) across native and npm Claude Code CLI installations (npm global prefix resolution via `npm`, `.npmrc`, `NPM_CONFIG_PREFIX`, `%APPDATA%\npm`), Claude Desktop, VS Code / Cursor / Windsurf Claude extensions, MSIX packages, Start Menu / Desktop / Startup `.lnk` shortcuts, Windows services/scheduled tasks, environment variable **names only** (`Scope` + `Name`, never secret values), `PATH` entries, Credential Manager target counts (no secret values read), AppData role classification, path ACL/owner/reparse diagnostics, and read-only WSL reporting.
+- Structured JSON output (`-OutputFormat Json`) alongside text reports across `-Audit`, `-Plan`, `-Verify`, and `-Apply` for automation and skill integration.
 - Deterministic `SchemaVersion = 3` cleanup plan (`-Plan`) outputting `CLEANUP-PLAN.md` with per-entry `Ready` / `ReviewOnly` / `Blocked` decisions, NTFS `VolumeSerialNumber` / `FileIndex`, and subtree `MaxLastWriteUtcTicks`.
 - Win32 handle-bound filesystem deletion (`SetFileInformationByHandle`) with strict reparse-point rejection, child ownership enforcement, single-read SHA-256 verification, and atomic execution-ledger replay protection.
+- Controlled package uninstallers under `FullRemoval`: strictly scoped `npm uninstall -g @anthropic-ai/claude-code`, `code --uninstall-extension anthropic.claude-code`, and MSIX `Remove-AppxPackage` with fail-closed post-check verification.
 - Structured failure reporting (`Removed`, `AlreadyAbsent`, `Skipped`, `Blocked`, `Failed`, `NotExecuted`, `PartialRemoval`, `PresenceState`: `Present` / `Absent` / `Unknown`).
 
 ### Planned (Not Yet Implemented)
-- Extended Windows coverage (ACL diagnostics, `code --uninstall-extension` integration, npm prefix resolution, ambiguous folder attribution).
 - Cross-agent Skill (`claude-cleanup`) for Codex CLI, Antigravity CLI, Gemini CLI, and Claude Code.
 - Nontechnical Windows launcher, user-scoped installer/uninstaller, CI workflows, and optional GUI evaluation.
 
@@ -65,12 +66,12 @@ Review `AUDIT.md` (if saved) and the generated `CLEANUP-PLAN.md` plus its SHA-25
 | Command | Purpose | Writes to Disk |
 | :--- | :--- | :--- |
 | `.\ClaudeCleanup.ps1 -Help` | Show usage and safety boundaries | None |
-| `.\ClaudeCleanup.ps1 -Audit` | Read-only environment & candidate inventory | None |
-| `.\ClaudeCleanup.ps1 -Plan` | Generate `CLEANUP-PLAN.md` (`SchemaVersion = 3`) | `CLEANUP-PLAN.md` only |
+| `.\ClaudeCleanup.ps1 -Audit [-OutputFormat Text\|Json]` | Read-only environment, ACL/AppData diagnostics, and candidate inventory | None |
+| `.\ClaudeCleanup.ps1 -Plan [-OutputFormat Text\|Json]` | Generate `CLEANUP-PLAN.md` (`SchemaVersion = 3`) | `CLEANUP-PLAN.md` only |
 | `.\ClaudeCleanup.ps1 -Plan -WhatIf` | Preview plan generation without writing | None |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex> -WhatIf` | Dry-run preview of authorized targets | None |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex>` | Execute approved `Ready` targets after confirmation | Deletes approved targets + updates `VERIFICATION.md` ledger |
-| `.\ClaudeCleanup.ps1 -Verify` | Inspect current state vs. `CLEANUP-PLAN.md` and `VERIFICATION.md` | None |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex> [-OutputFormat Text\|Json] -WhatIf` | Dry-run preview of authorized targets | None |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex> [-OutputFormat Text\|Json]` | Execute approved `Ready` targets after confirmation | Deletes approved targets + updates `VERIFICATION.md` ledger |
+| `.\ClaudeCleanup.ps1 -Verify [-OutputFormat Text\|Json]` | Inspect current state vs. `CLEANUP-PLAN.md` and `VERIFICATION.md` | None |
 
 ## 9. Audit / Plan / Apply / Verify Workflow
 
@@ -123,8 +124,8 @@ powershell.exe -NoProfile -File .\tests\ClaudeCleanup.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\ClaudeCleanup.Tests.ps1
 ```
 
-- Covers path boundaries, ADS/trailing-dot/space rejection, no `Remove-Item` / `CheckOwner $false` / `RegDeleteKeyW` invariants, 3-state `Present` / `Absent` / `Unknown` detection, junctions, dangling junctions, parent-path substitution, conditional symlink tests, nested same-size tampering (`MaxLastWriteUtcTicks`), `FileIndex` swap detection, manifest tampering, replay blocking, atomic ledger corruption recovery, mocked registry verification, and partial-failure reporting.
-- **Permission Note**: Creating Windows symbolic links requires Administrator or Developer Mode privileges (`SeCreateSymbolicLinkPrivilege`); unprivileged sessions explicitly report those symlink creation cases as `SKIP` (and restricted app-container sandboxes may also block `FSCTL_SET_REPARSE_POINT` junction creation). Live HKCU write/delete and cross-SID mixed-ownership disk tests are explicitly reported as `NotExecuted` when restricted by authorization.
+- Covers path boundaries, ADS/trailing-dot/space rejection, no `Remove-Item` / `CheckOwner $false` / `RegDeleteKeyW` invariants, 3-state `Present` / `Absent` / `Unknown` detection, junctions, dangling junctions, parent-path substitution, conditional symlink tests, nested same-size tampering (`MaxLastWriteUtcTicks`), `FileIndex` swap detection, manifest tampering, replay blocking, atomic ledger corruption recovery, mocked registry verification, partial-failure reporting, npm prefix/package detection and scoped `@anthropic-ai/claude-code` uninstall guards, mocked `AppxPackage` and VS Code `anthropic.claude-code` uninstall transitions, `Get-PathAclDiagnostics` / `Get-AppDataClassification`, and `-OutputFormat Json` schema/privacy checks (no secret env values).
+- **Permission & Authorization Note**: Creating Windows symbolic links requires Administrator or Developer Mode privileges (`SeCreateSymbolicLinkPrivilege`); unprivileged sessions explicitly report those symlink creation cases as `SKIP` (and restricted app-container sandboxes may also block `FSCTL_SET_REPARSE_POINT` junction creation). Live HKCU write/delete, cross-SID mixed-ownership disk tests, and live `npm` / `code` / `Remove-AppxPackage` uninstall calls remain explicitly reported as `NotExecuted` during sandboxed testing.
 
 ## 15. Known Issues and Unsupported Operations
 

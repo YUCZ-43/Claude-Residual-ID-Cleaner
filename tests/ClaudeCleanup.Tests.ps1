@@ -452,6 +452,148 @@ try {
     $v3 = @($verOut.PlanChecks | Where-Object { $_.Id -eq 'pf-3' })[0]
     Assert-True (($v1.PresenceState -eq 'Absent') -and ($v2.PresenceState -eq 'Present') -and ($v3.PresenceState -eq 'Present') -and $verOut.LedgerEntries.Count -eq 1 -and $verOut.LedgerEntries[0].Outcome -eq 'PartialFailure') 'post-apply Verify reports exact 3-state presence and ledger outcome'
 
+    # 13. Stage C: Windows coverage (npm, MSIX, VS Code, AppData classification, residuals, ACL diagnostics, JSON output)
+    $npmPrefix = Join-Path $sandbox 'npm-prefix'
+    $npmClaudeDir = Join-Path $npmPrefix 'node_modules\@anthropic-ai\claude-code'
+    $npmUnrelatedDir = Join-Path $npmPrefix 'node_modules\unrelated-pkg'
+    New-Item -ItemType Directory -Path $npmClaudeDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $npmUnrelatedDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $npmClaudeDir 'package.json') -Value '{"name":"@anthropic-ai/claude-code","version":"2.1.0"}'
+    Set-Content -LiteralPath (Join-Path $npmUnrelatedDir 'package.json') -Value '{"name":"unrelated-pkg","version":"1.0.0"}'
+    Set-Content -LiteralPath (Join-Path $npmPrefix 'claude.cmd') -Value '@echo off'
+
+    $prevNpmPrefix = $env:NPM_CONFIG_PREFIX
+    $env:NPM_CONFIG_PREFIX = $npmPrefix
+    try {
+        $npmInstalls = @(Get-NpmClaudePackageInstallations | Where-Object { $_.PrefixPath -eq $npmPrefix })
+        Assert-True ($npmInstalls.Count -eq 1 -and $npmInstalls[0].Version -eq '2.1.0' -and $npmInstalls[0].SafeToUninstall -and ($npmInstalls[0].Shims -contains (Join-Path $npmPrefix 'claude.cmd'))) 'npm Claude Code installation detected without touching unrelated packages'
+    } finally {
+        $env:NPM_CONFIG_PREFIX = $prevNpmPrefix
+    }
+    Assert-Throws { Invoke-NpmClaudeUninstall -PackageName 'unrelated-pkg' -PrefixPath $npmPrefix } 'npm uninstall refuses unrelated package'
+
+    # Mocked NpmPackage Plan -> Apply -> Verify preserves unrelated-pkg
+    $npmWorkDir = Join-Path $sandbox 'npm-e2e'
+    New-Item -ItemType Directory -Path $npmWorkDir -Force | Out-Null
+    $npmPlanPath = Join-Path $npmWorkDir 'PLAN.md'
+    $npmVerPath = Join-Path $npmWorkDir 'VERIFICATION.md'
+    $npmCand = Get-Candidate -Id 'npm-sb' -Path $npmClaudeDir -Category 'npm Claude Code package' -Policy 'FullRemoval' -Kind 'NpmPackage' -Decision 'Ready' -Identity $npmPrefix
+    $npmPlanInfo = Invoke-CleanupPlan -PlanPath $npmPlanPath -CandidatesOverride @($npmCand)
+    $origGetNpm = (Get-Item Function:\Get-NpmCommand).ScriptBlock
+    $origNpmUninstall = (Get-Item Function:\Invoke-NpmClaudeUninstall).ScriptBlock
+    try {
+        Set-Item Function:\Get-NpmCommand -Value { [pscustomobject]@{ Source = 'mock-npm.cmd' } }
+        Set-Item Function:\Invoke-NpmClaudeUninstall -Value {
+            param([string]$PackageName, [string]$PrefixPath)
+            $script:mockNpmRemoved = "$PackageName|$PrefixPath"
+            Invoke-SafeFileRemoval -Path (Join-Path $PrefixPath 'node_modules\@anthropic-ai\claude-code') -AllowedRoots @($PrefixPath) -Confirm:$false | Out-Null
+        }
+        $npmApplyOut = Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $npmPlanInfo.Sha256 -PlanPath $npmPlanPath -VerificationPath $npmVerPath -CandidatesOverride @($npmCand) -Confirm:$false
+        Assert-True ($npmApplyOut.Outcome -eq 'Succeeded' -and $script:mockNpmRemoved -eq "@anthropic-ai/claude-code|$npmPrefix" -and (Test-Path -LiteralPath (Join-Path $npmUnrelatedDir 'package.json'))) 'mocked npm uninstall succeeds and preserves unrelated npm packages'
+    } finally {
+        Set-Item Function:\Get-NpmCommand -Value $origGetNpm
+        Set-Item Function:\Invoke-NpmClaudeUninstall -Value $origNpmUninstall
+    }
+
+    # Mocked MSIX AppxPackage uninstall + guard against unexpected package names
+    Assert-Throws { Invoke-ClaudeAppxUninstall -PackageFullName 'FakeApp_1.0.0_x64__badid' } 'MSIX uninstall refuses non-Claude package'
+    $msixWorkDir = Join-Path $sandbox 'msix-e2e'
+    New-Item -ItemType Directory -Path $msixWorkDir -Force | Out-Null
+    $msixPlanPath = Join-Path $msixWorkDir 'PLAN.md'
+    $msixVerPath = Join-Path $msixWorkDir 'VERIFICATION.md'
+    $msixName = 'Claude_5.11492.5.0_x64__pzs8sxrjxfjjc'
+    $msixCand = Get-Candidate -Id 'appx-sb' -Path $msixName -Category 'Claude Desktop MSIX' -Policy 'FullRemoval' -Kind 'AppxPackage' -Decision 'Ready'
+    $msixPlanInfo = Invoke-CleanupPlan -PlanPath $msixPlanPath -CandidatesOverride @($msixCand)
+    $origGetAppx = (Get-Item Function:\Get-ClaudeAppxPackage).ScriptBlock
+    $origAppxUninstall = (Get-Item Function:\Invoke-ClaudeAppxUninstall).ScriptBlock
+    $script:mockAppxPresent = $true
+    try {
+        Set-Item Function:\Get-ClaudeAppxPackage -Value {
+            if ($script:mockAppxPresent) {
+                return @([pscustomobject]@{ PackageFullName = 'Claude_5.11492.5.0_x64__pzs8sxrjxfjjc'; PackageFamilyName = 'Claude_pzs8sxrjxfjjc'; Publisher = 'CN=Anthropic PBC' })
+            }
+            return @()
+        }
+        Set-Item Function:\Invoke-ClaudeAppxUninstall -Value {
+            param([string]$PackageFullName)
+            $script:mockAppxRemoved = $PackageFullName
+            $script:mockAppxPresent = $false
+        }
+        $msixApplyOut = Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $msixPlanInfo.Sha256 -PlanPath $msixPlanPath -VerificationPath $msixVerPath -CandidatesOverride @($msixCand) -Confirm:$false
+        Assert-True ($msixApplyOut.Outcome -eq 'Succeeded' -and $script:mockAppxRemoved -eq $msixName -and $msixApplyOut.Results[0].VerifiedAbsent) 'mocked MSIX uninstall succeeds and verifies absence'
+
+        # Verify fail-closed when package remains present after uninstall
+        $script:mockAppxPresent = $true
+        $msixPlanInfo2 = Invoke-CleanupPlan -PlanPath $msixPlanPath -CandidatesOverride @($msixCand)
+        Set-Item Function:\Invoke-ClaudeAppxUninstall -Value { param([string]$PackageFullName) }
+        Assert-Throws { Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $msixPlanInfo2.Sha256 -PlanPath $msixPlanPath -VerificationPath $msixVerPath -CandidatesOverride @($msixCand) -Confirm:$false } 'MSIX uninstall fails closed if package stays present'
+    } finally {
+        Set-Item Function:\Get-ClaudeAppxPackage -Value $origGetAppx
+        Set-Item Function:\Invoke-ClaudeAppxUninstall -Value $origAppxUninstall
+    }
+
+    # Mocked VS Code extension CLI uninstall + guard
+    Assert-Throws { Invoke-VsCodeExtensionUninstall -ExtensionId 'unrelated.extension' } 'VS Code uninstall refuses unrelated extension ID'
+    $vsSandboxRoot = Join-Path $sandbox 'vscode-ext-root'
+    $vsExtDir = Join-Path $vsSandboxRoot 'anthropic.claude-code-2.1.325-win32-x64'
+    New-Item -ItemType Directory -Path $vsExtDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $vsExtDir 'package.json') -Value '{"publisher":"anthropic","name":"claude-code","version":"2.1.325"}'
+    $vsWorkDir = Join-Path $sandbox 'vscode-e2e'
+    New-Item -ItemType Directory -Path $vsWorkDir -Force | Out-Null
+    $vsPlanPath = Join-Path $vsWorkDir 'PLAN.md'
+    $vsVerPath = Join-Path $vsWorkDir 'VERIFICATION.md'
+    $vsCand = Get-Candidate -Id 'vscode-cli-sb' -Path 'anthropic.claude-code' -Category 'VS Code extension (CLI)' -Policy 'FullRemoval' -Kind 'VsCodeExtension' -Decision 'Ready' -Identity $vsSandboxRoot
+    $vsPlanInfo = Invoke-CleanupPlan -PlanPath $vsPlanPath -CandidatesOverride @($vsCand)
+    $origGetCode = (Get-Item Function:\Get-VsCodeCliCommand).ScriptBlock
+    $origVsUninstall = (Get-Item Function:\Invoke-VsCodeExtensionUninstall).ScriptBlock
+    try {
+        Set-Item Function:\Get-VsCodeCliCommand -Value { [pscustomobject]@{ Source = 'mock-code.cmd' } }
+        Set-Item Function:\Invoke-VsCodeExtensionUninstall -Value {
+            param([string]$ExtensionId)
+            $script:mockVsRemoved = $ExtensionId
+            Invoke-SafeFileRemoval -Path (Join-Path $vsSandboxRoot 'anthropic.claude-code-2.1.325-win32-x64') -AllowedRoots @($vsSandboxRoot) -Confirm:$false | Out-Null
+        }
+        $vsApplyOut = Invoke-CleanupApply -Policy 'FullRemoval' -ApprovedManifestSha256 $vsPlanInfo.Sha256 -PlanPath $vsPlanPath -VerificationPath $vsVerPath -CandidatesOverride @($vsCand) -Confirm:$false
+        Assert-True ($vsApplyOut.Outcome -eq 'Succeeded' -and $script:mockVsRemoved -eq 'anthropic.claude-code' -and $vsApplyOut.Results[0].VerifiedAbsent) 'mocked VS Code extension CLI uninstall succeeds and verifies absence'
+    } finally {
+        Set-Item Function:\Get-VsCodeCliCommand -Value $origGetCode
+        Set-Item Function:\Invoke-VsCodeExtensionUninstall -Value $origVsUninstall
+    }
+
+    # Read-only ACL diagnostics, AppData classification, residual summary (no env secret values), and structured JSON report
+    $aclOk = Get-PathAclDiagnostics -Path $allowed
+    $aclAbsent = Get-PathAclDiagnostics -Path (Join-Path $sandbox 'no-such-acl-dir')
+    $aclBad = Get-PathAclDiagnostics -Path '\\?\C:\invalid'
+    Assert-True ($aclOk.Status -eq 'Ok' -and $aclOk.IsCurrentUserOwner -and (-not $aclOk.IsBuiltinAdminOwned) -and $aclAbsent.Status -eq 'Absent' -and $aclBad.Status -eq 'AccessDenied') 'read-only ACL diagnostics classify Ok, Absent, and AccessDenied'
+
+    if ($junctionCreated) {
+        $aclJunc = Join-Path $sandbox 'acl-junction'
+        New-Item -ItemType Junction -Path $aclJunc -Target $outside -ErrorAction Stop | Out-Null
+        try {
+            $aclReparse = Get-PathAclDiagnostics -Path $aclJunc
+            Assert-True ($aclReparse.Status -eq 'ReparseBlocked') 'read-only ACL diagnostics identify reparse points safely'
+        } finally {
+            [IO.Directory]::Delete($aclJunc)
+        }
+    } else {
+        $skipped++
+        Write-Output 'SKIP: ACL reparse-point diagnostic test skipped because junction creation was blocked'
+    }
+
+    $appClass = @(Get-AppDataClassification)
+    $validRoles = @('Cache', 'Diagnostics', 'AuthReview', 'UserSessionOrMixed', 'AmbiguousLegacy')
+    $rolesValid = (@($appClass | Where-Object { $_.Role -notin $validRoles }).Count -eq 0)
+    Assert-True $rolesValid 'AppData classification assigns only valid structured roles'
+
+    $auditJsonObj = Get-StructuredAuditReport | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+    $envVarsNoValues = (@($auditJsonObj.Summary.EnvironmentVariableNames | Where-Object { $_.PSObject.Properties['Value'] }).Count -eq 0)
+    Assert-True ($auditJsonObj.SchemaVersion -eq 3 -and $auditJsonObj.Mode -eq 'Audit' -and $null -ne $auditJsonObj.Summary -and $envVarsNoValues) 'structured JSON audit report valid and omits secret env values'
+
+    $notExecuted += 3
+    Write-Output 'NOT_EXECUTED: live npm uninstall -g @anthropic-ai/claude-code (mocked only)'
+    Write-Output 'NOT_EXECUTED: live code --uninstall-extension anthropic.claude-code (mocked only)'
+    Write-Output 'NOT_EXECUTED: live Remove-AppxPackage Claude Desktop MSIX (mocked only)'
+
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; 0 failed"
 } finally {
     foreach ($s in $openStreams) { Unlock-Safely $s }

@@ -12,20 +12,21 @@
 
 ## 2. 当前发布状态
 
-- **开发阶段**：预发布 / 安全加固阶段（已完成 P0 删除安全加固并处于验收审查阶段）。
+- **开发阶段**：预发布 / 主动开发阶段（已完成 P0 删除安全加固与 Windows 清理覆盖扩展，正处于验收审查阶段）。
 - **真实清理状态**：开发与测试期间**未授权、也未执行**任何真实 Claude 数据删除。
 - **仓库状态**：当前为私有开发仓库（`main` 分支）。
 
 ## 3. 功能特性与限制
 
 ### 已实现能力
-- 只读环境与候选审计（`-Audit`）：覆盖 Claude Code CLI、Claude Desktop、VS Code 扩展、MSIX 包、相关服务/定时任务、环境变量、`PATH`、Credential Manager 目标计数（不读取秘密值）及 WSL 只读状态报告。
+- 只读环境与候选审计（`-Audit`）：覆盖原生及 npm 全局安装版 Claude Code CLI（通过 `npm`、`.npmrc`、`NPM_CONFIG_PREFIX`、`%APPDATA%\npm` 解析前缀）、Claude Desktop、VS Code / Cursor / Windsurf Claude 扩展、MSIX 包、开始菜单/桌面/启动项 `.lnk` 快捷方式、相关服务/定时任务、环境变量**仅名称**（仅输出 `Scope` 与 `Name`，绝不读取秘密值）、`PATH` 残留项、Credential Manager 目标计数（不读取秘密值）、AppData 角色分类、路径 ACL/所有者/重解析点诊断以及 WSL 只读状态报告。
+- 结构化 JSON 输出（`-OutputFormat Json`）：在 `-Audit`、`-Plan`、`-Verify` 与 `-Apply` 模式下均支持机器可读 JSON 输出，便于自动化与后续 Skill 集成。
 - 确定性 `SchemaVersion = 3` 清单生成（`-Plan`）：输出 `CLEANUP-PLAN.md`，标注 `Ready` / `ReviewOnly` / `Blocked` 决策，并记录 NTFS `VolumeSerialNumber`、`FileIndex` 及子树最大修改时间戳 `MaxLastWriteUtcTicks`。
 - Win32 句柄绑定文件删除（`SetFileInformationByHandle`）：严格拒绝重解析点、校验子树所有者 SID、单次字节读取校验 SHA-256，并通过原子执行台账防止授权重放。
+- 受控包卸载器（仅 `FullRemoval`）：严格限定作用域执行 `npm uninstall -g @anthropic-ai/claude-code`、`code --uninstall-extension anthropic.claude-code` 与 MSIX `Remove-AppxPackage`，并在卸载后执行 fail-closed 存在性核验。
 - 结构化状态与失败报告：明确区分 `Removed`、`AlreadyAbsent`、`Skipped`、`Blocked`、`Failed`、`NotExecuted`、`PartialRemoval` 以及三态存在性 `PresenceState`（`Present` / `Absent` / `Unknown`）。
 
 ### 规划中能力（尚未实现）
-- Windows 专项覆盖扩展（ACL 诊断、`code --uninstall-extension` 集成、npm 全局前缀识别、疑难目录归属核实）。
 - 跨代理 Skill（`claude-cleanup`，兼容 Codex CLI、Antigravity CLI、Gemini CLI 与 Claude Code）。
 - 面向普通用户的轻量 Windows 启动器、用户级安装/卸载脚本、CI 流水线及可选 GUI 评估。
 
@@ -65,12 +66,12 @@
 | 命令 | 用途 | 磁盘写入行为 |
 | :--- | :--- | :--- |
 | `.\ClaudeCleanup.ps1 -Help` | 显示用法与安全边界说明 | 无写入 |
-| `.\ClaudeCleanup.ps1 -Audit` | 只读检查系统环境与候选清单 | 无写入 |
-| `.\ClaudeCleanup.ps1 -Plan` | 生成 `CLEANUP-PLAN.md`（`SchemaVersion = 3`） | 仅写入 `CLEANUP-PLAN.md` |
+| `.\ClaudeCleanup.ps1 -Audit [-OutputFormat Text\|Json]` | 只读检查系统环境、ACL/AppData 诊断与候选清单 | 无写入 |
+| `.\ClaudeCleanup.ps1 -Plan [-OutputFormat Text\|Json]` | 生成 `CLEANUP-PLAN.md`（`SchemaVersion = 3`） | 仅写入 `CLEANUP-PLAN.md` |
 | `.\ClaudeCleanup.ps1 -Plan -WhatIf` | 预览规划条目数但不落盘 | 无写入 |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希> -WhatIf` | 干跑预览获批策略下的执行目标 | 无写入、不消耗哈希 |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希>` | 经交互确认后执行 `Ready` 目标 | 删除获批目标并更新 `VERIFICATION.md` 台账 |
-| `.\ClaudeCleanup.ps1 -Verify` | 只读核验当前状态、清单与执行台账 | 无写入 |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希> [-OutputFormat Text\|Json] -WhatIf` | 干跑预览获批策略下的执行目标 | 无写入、不消耗哈希 |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希> [-OutputFormat Text\|Json]` | 经交互确认后执行 `Ready` 目标 | 删除获批目标并更新 `VERIFICATION.md` 台账 |
+| `.\ClaudeCleanup.ps1 -Verify [-OutputFormat Text\|Json]` | 只读核验当前状态、清单与执行台账 | 无写入 |
 
 ## 9. Audit / Plan / Apply / Verify 工作流
 
@@ -123,8 +124,8 @@ powershell.exe -NoProfile -File .\tests\ClaudeCleanup.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\ClaudeCleanup.Tests.ps1
 ```
 
-- 覆盖路径边界（ADS / 尾随空格与点 / 精确根保护）、无 `Remove-Item` / `-CheckOwner $false` / `RegDeleteKeyW` 代码不变量、三态存在性（`Present` / `Absent` / `Unknown`）、junction、断链、父路径替换、条件符号链接测试、子树同长度篡改（`MaxLastWriteUtcTicks`）、`FileIndex` 替换、清单篡改与防重放、台账截断与持久化失败阻断、Mock 注册表验证及部分失败与事后核验。
-- **权限说明**：在 Windows 上创建符号链接需要管理员权限或开发者模式（`SeCreateSymbolicLinkPrivilege`），非特权会话会将对应符号链接创建用例明确标为 `SKIP`（不计入通过）；若在禁用 `FSCTL_SET_REPARSE_POINT` 的沙箱内运行，junction 创建也会相应跳过；未经单独授权的真实 HKCU 写入与跨 SID 磁盘测试会明确标为 `NotExecuted`。
+- 覆盖路径边界（ADS / 尾随空格与点 / 精确根保护）、无 `Remove-Item` / `-CheckOwner $false` / `RegDeleteKeyW` 代码不变量、三态存在性（`Present` / `Absent` / `Unknown`）、junction、断链、父路径替换、条件符号链接测试、子树同长度篡改（`MaxLastWriteUtcTicks`）、`FileIndex` 替换、清单篡改与防重放、台账截断与持久化失败阻断、Mock 注册表验证、部分失败与事后核验、npm 前缀/包检测与限定 `@anthropic-ai/claude-code` 卸载保护、Mock `AppxPackage` 与 VS Code `anthropic.claude-code` 卸载状态流转、`Get-PathAclDiagnostics` / `Get-AppDataClassification`，以及 `-OutputFormat Json` 结构与隐私检查（不含环境变量值）。
+- **权限与授权说明**：在 Windows 上创建符号链接需要管理员权限或开发者模式（`SeCreateSymbolicLinkPrivilege`），非特权会话会将对应符号链接创建用例明确标为 `SKIP`（不计入通过）；若在禁用 `FSCTL_SET_REPARSE_POINT` 的沙箱内运行，junction 创建也会相应跳过；未经单独授权的真实 HKCU 写入、跨 SID 磁盘测试以及真实 `npm` / `code` / `Remove-AppxPackage` 卸载执行均明确标为 `NotExecuted`。
 
 ## 15. 已知问题与不支持的操作
 

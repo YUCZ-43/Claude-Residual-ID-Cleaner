@@ -6,7 +6,8 @@ param(
     [switch]$Verify,
     [switch]$Help,
     [ValidateSet('AccountData', 'FullRemoval')][string]$Policy,
-    [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ApprovedManifestSha256
+    [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ApprovedManifestSha256,
+    [ValidateSet('Text', 'Json')][string]$OutputFormat = 'Text'
 )
 
 Set-StrictMode -Version 2.0
@@ -1047,9 +1048,431 @@ function Get-ClaudeAppxPackage {
 
 function Get-Candidate {
     param([string]$Id, [string]$Path, [string]$Category, [string]$Policy,
-        [string]$Kind = 'Filesystem', [string]$Warning = '', [string]$Decision = 'Ready')
+        [string]$Kind = 'Filesystem', [string]$Warning = '', [string]$Decision = 'Ready',
+        [AllowNull()][string]$Identity = $null)
     return [pscustomobject]@{ Id = $Id; Path = $Path; Category = $Category; Policy = $Policy;
-        Kind = $Kind; Warning = $Warning; Decision = $Decision }
+        Kind = $Kind; Warning = $Warning; Decision = $Decision; Identity = $Identity }
+}
+
+function Resolve-SidToAccountName {
+    param([Parameter(Mandatory = $true)][string]$SidValue)
+    try {
+        $sidObj = New-Object System.Security.Principal.SecurityIdentifier($SidValue)
+        return $sidObj.Translate([System.Security.Principal.NTAccount]).Value
+    } catch {
+        return $SidValue
+    }
+}
+
+function Get-PathAclDiagnostics {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $pres = Get-TargetPresenceState $Path
+    if ($pres.State -ne 'Present') {
+        return [pscustomobject]@{
+            Path = $Path
+            State = $pres.State
+            Owner = $null
+            OwnerSid = $null
+            IsCurrentUserOwner = $null
+            IsBuiltinAdminOwned = $null
+            ProtectedFromInheritance = $null
+            ExplicitDenyCount = $null
+            Status = if ($pres.State -eq 'Absent') { 'Absent' } else { 'AccessDenied' }
+            Error = $pres.Error
+        }
+    }
+    try {
+        $normal = Get-NormalPath $Path
+        [uint32]$attrs = 0
+        [void][ClaudeCleanup.NativeFs]::TryGetAttributes($normal, [ref]$attrs)
+        if (($attrs -band [ClaudeCleanup.NativeFs]::FILE_ATTRIBUTE_REPARSE_POINT) -ne 0) {
+            return [pscustomobject]@{
+                Path = $normal; State = 'Present'; Owner = $null; OwnerSid = $null
+                IsCurrentUserOwner = $null; IsBuiltinAdminOwned = $null
+                ProtectedFromInheritance = $null; ExplicitDenyCount = $null
+                Status = 'ReparseBlocked'; Error = 'Reparse point blocks direct ACL inspection/deletion'
+            }
+        }
+        $isDir = (($attrs -band [ClaudeCleanup.NativeFs]::FILE_ATTRIBUTE_DIRECTORY) -ne 0)
+        [int]$err = 0
+        $handle = [ClaudeCleanup.NativeFs]::OpenHandle($normal, $false, $isDir, [ref]$err)
+        try {
+            if ($handle.IsInvalid) {
+                throw (New-Object System.ComponentModel.Win32Exception($err, "Cannot open target for ACL diagnostics: $normal"))
+            }
+            $id = [ClaudeCleanup.NativeFs]::InspectHandle($handle)
+            $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $isOwner = $id.OwnerSid.Equals($currentSid, [StringComparison]::OrdinalIgnoreCase)
+            $isAdmin = $id.OwnerSid.Equals('S-1-5-32-544', [StringComparison]::OrdinalIgnoreCase)
+            $ownerName = Resolve-SidToAccountName -SidValue $id.OwnerSid
+            $protected = $null
+            $denyCount = $null
+            try {
+                $acl = Get-Acl -LiteralPath $normal -ErrorAction Stop
+                $protected = $acl.AreAccessRulesProtected
+                $denyCount = @($acl.Access | Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny }).Count
+            } catch {}
+            $status = if ($isOwner) { 'Ok' } elseif ($isAdmin) { 'AdminOwned' } else { 'OtherOwner' }
+            return [pscustomobject]@{
+                Path = $normal
+                State = 'Present'
+                Owner = $ownerName
+                OwnerSid = $id.OwnerSid
+                IsCurrentUserOwner = $isOwner
+                IsBuiltinAdminOwned = $isAdmin
+                ProtectedFromInheritance = $protected
+                ExplicitDenyCount = $denyCount
+                Status = $status
+                Error = ''
+            }
+        } finally {
+            if ($null -ne $handle) { $handle.Dispose() }
+        }
+    } catch {
+        return [pscustomobject]@{
+            Path = $Path; State = 'Unknown'; Owner = $null; OwnerSid = $null
+            IsCurrentUserOwner = $false; IsBuiltinAdminOwned = $null
+            ProtectedFromInheritance = $null; ExplicitDenyCount = $null
+            Status = 'AccessDenied'; Error = $_.Exception.Message
+        }
+    }
+}
+
+function Get-NpmPrefixCandidates {
+    $candidates = New-Object 'System.Collections.Generic.List[string]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $addPrefix = {
+        param([string]$RawPath)
+        if ([string]::IsNullOrWhiteSpace($RawPath)) { return }
+        try {
+            $norm = Get-NormalPath $RawPath.Trim()
+            if ($seen.Add($norm)) { $candidates.Add($norm) }
+        } catch {}
+    }
+    $envPrefix = [Environment]::GetEnvironmentVariable('NPM_CONFIG_PREFIX')
+    & $addPrefix $envPrefix
+    $npmrc = Join-Path $env:USERPROFILE '.npmrc'
+    if ((Get-TargetPresenceState $npmrc).State -eq 'Present') {
+        try {
+            foreach ($line in (Get-Content -LiteralPath $npmrc -ErrorAction Stop)) {
+                if ($line -match '^\s*prefix\s*=\s*(.+)$') {
+                    $val = $matches[1].Trim().Trim('"').Trim("'")
+                    & $addPrefix $val
+                }
+            }
+        } catch {}
+    }
+    & $addPrefix (Join-Path $env:APPDATA 'npm')
+    if ($env:ProgramFiles) { & $addPrefix (Join-Path $env:ProgramFiles 'nodejs') }
+    return $candidates.ToArray()
+}
+
+function Get-NpmClaudePackageInstallations {
+    $results = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($prefix in (Get-NpmPrefixCandidates)) {
+        $pkgDir = Join-Path $prefix 'node_modules\@anthropic-ai\claude-code'
+        $pkgJsonPath = Join-Path $pkgDir 'package.json'
+        $pkgState = Get-TargetPresenceState $pkgJsonPath
+        if ($pkgState.State -eq 'Absent') { continue }
+        if ($pkgState.State -eq 'Unknown') {
+            $results.Add([pscustomobject]@{
+                PackagePath = $pkgDir
+                PrefixPath = $prefix
+                Version = $null
+                Shims = @()
+                SafeToUninstall = $false
+                BlockReason = "Cannot inspect npm package.json: $($pkgState.Error)"
+            })
+            continue
+        }
+        try {
+            $pkgMeta = Get-Content -LiteralPath $pkgJsonPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($pkgMeta.name -ne '@anthropic-ai/claude-code') { continue }
+            $safePkg = Test-SafeTarget -Path $pkgDir -AllowedRoots @($pkgDir)
+            $shims = New-Object 'System.Collections.Generic.List[string]'
+            foreach ($shimName in @('claude', 'claude.cmd', 'claude.ps1')) {
+                $shimPath = Join-Path $prefix $shimName
+                if ((Get-TargetPresenceState $shimPath).State -eq 'Present') { $shims.Add($shimPath) }
+            }
+            $results.Add([pscustomobject]@{
+                PackagePath = $pkgDir
+                PrefixPath = $prefix
+                Version = [string]$pkgMeta.version
+                Shims = $shims.ToArray()
+                SafeToUninstall = [bool]$safePkg.Allowed
+                BlockReason = if ($safePkg.Allowed) { '' } else { $safePkg.Reason }
+            })
+        } catch {
+            $results.Add([pscustomobject]@{
+                PackagePath = $pkgDir
+                PrefixPath = $prefix
+                Version = $null
+                Shims = @()
+                SafeToUninstall = $false
+                BlockReason = "Cannot parse npm package metadata: $($_.Exception.Message)"
+            })
+        }
+    }
+    return $results.ToArray()
+}
+
+function Get-AppDataClassification {
+    $rows = New-Object 'System.Collections.Generic.List[object]'
+    $roamingClaude = Join-Path $env:APPDATA 'Claude'
+    $localClaude = Join-Path $env:LOCALAPPDATA 'Claude'
+    $specs = @(
+        @($roamingClaude, 'Cache', 'Cache'),
+        @($roamingClaude, 'Code Cache', 'Cache'),
+        @($roamingClaude, 'GPUCache', 'Cache'),
+        @($roamingClaude, 'DawnGraphiteCache', 'Cache'),
+        @($roamingClaude, 'DawnWebGPUCache', 'Cache'),
+        @($roamingClaude, 'logs', 'Diagnostics'),
+        @($roamingClaude, 'Crashpad', 'Diagnostics'),
+        @($roamingClaude, 'buddy-tokens.json', 'AuthReview'),
+        @($roamingClaude, 'Cookies', 'AuthReview'),
+        @($roamingClaude, 'Network', 'AuthReview'),
+        @($roamingClaude, 'Local Storage', 'UserSessionOrMixed'),
+        @($roamingClaude, 'IndexedDB', 'UserSessionOrMixed'),
+        @($roamingClaude, 'local-agent-mode-sessions', 'UserSessionOrMixed'),
+        @($roamingClaude, 'claude-code-sessions', 'UserSessionOrMixed'),
+        @($roamingClaude, 'claude-code-vm', 'UserSessionOrMixed'),
+        @($roamingClaude, 'vm_bundles', 'UserSessionOrMixed'),
+        @($roamingClaude, 'Claude Extensions', 'UserSessionOrMixed'),
+        @($roamingClaude, 'claude_desktop_config.json', 'UserSessionOrMixed'),
+        @($roamingClaude, 'claude_desktop_config.json.rea.backup', 'UserSessionOrMixed'),
+        @($localClaude, 'logs', 'Diagnostics'),
+        @((Join-Path $env:LOCALAPPDATA 'Claude-3p'), '', 'AmbiguousLegacy'),
+        @((Join-Path $env:APPDATA 'Claude-3p'), '', 'AmbiguousLegacy')
+    )
+    foreach ($s in $specs) {
+        $target = if ([string]::IsNullOrEmpty($s[1])) { $s[0] } else { Join-Path $s[0] $s[1] }
+        $st = Get-TargetPresenceState $target
+        if ($st.State -eq 'Absent') { continue }
+        $acl = Get-PathAclDiagnostics -Path $target
+        $rows.Add([pscustomobject]@{
+            Path = $target
+            Name = if ([string]::IsNullOrEmpty($s[1])) { Split-Path -Leaf $s[0] } else { $s[1] }
+            Role = $s[2]
+            PresenceState = $st.State
+            OwnerStatus = $acl.Status
+            Owner = $acl.Owner
+        })
+    }
+    $pkgRoot = Join-Path $env:LOCALAPPDATA 'Packages'
+    if ((Get-TargetPresenceState $pkgRoot).State -eq 'Present') {
+        foreach ($pivot in (Get-ChildItem -LiteralPath $pkgRoot -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^0_https___pivot\.claude\.ai' })) {
+            $acl = Get-PathAclDiagnostics -Path $pivot.FullName
+            $rows.Add([pscustomobject]@{
+                Path = $pivot.FullName
+                Name = $pivot.Name
+                Role = 'AmbiguousLegacy'
+                PresenceState = 'Present'
+                OwnerStatus = $acl.Status
+                Owner = $acl.Owner
+            })
+        }
+    }
+    return $rows.ToArray()
+}
+
+function Get-ClaudeShortcutResiduals {
+    $shortcuts = New-Object 'System.Collections.Generic.List[object]'
+    $roots = @(
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),
+        (Join-Path $env:USERPROFILE 'Desktop'),
+        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs')
+    )
+    $shell = $null
+    try {
+        foreach ($root in $roots) {
+            if (-not $root -or (Get-TargetPresenceState $root).State -ne 'Present') { continue }
+            foreach ($lnk in (Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '(?i)claude' })) {
+                $targetPath = $null
+                try {
+                    if ($null -eq $shell) { $shell = New-Object -ComObject WScript.Shell }
+                    $sc = $shell.CreateShortcut($lnk.FullName)
+                    $targetPath = $sc.TargetPath
+                } catch {}
+                $shortcuts.Add([pscustomobject]@{
+                    ShortcutPath = $lnk.FullName
+                    TargetPath = $targetPath
+                    Decision = 'ReviewOnly'
+                })
+            }
+        }
+    } finally {
+        if ($null -ne $shell) {
+            try { [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null } catch {}
+        }
+    }
+    return $shortcuts.ToArray()
+}
+
+function Get-VsCodeClaudeDiscovery {
+    $codeCmd = try { Get-VsCodeCliCommand } catch { $null }
+    $extRoot = Join-Path $env:USERPROFILE '.vscode\extensions'
+    $extRootState = Get-TargetPresenceState $extRoot
+    $dirs = New-Object 'System.Collections.Generic.List[object]'
+    if ($extRootState.State -eq 'Present') {
+        foreach ($ext in (Get-ChildItem -LiteralPath $extRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^anthropic\.claude-code-[0-9]' })) {
+            $metadata = Join-Path $ext.FullName 'package.json'
+            try {
+                $package = Get-Content -LiteralPath $metadata -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                if ($package.publisher -eq 'anthropic' -and $package.name -eq 'claude-code') {
+                    $dirs.Add([pscustomobject]@{
+                        Name = $ext.Name
+                        FullName = $ext.FullName
+                        Version = [string]$package.version
+                    })
+                }
+            } catch { continue }
+        }
+    }
+    $obsolete = Join-Path $extRoot '.obsolete'
+    $obsoleteState = Get-TargetPresenceState $obsolete
+    $obsoleteHasClaude = $false
+    if ($obsoleteState.State -eq 'Present') {
+        $obsoleteText = Get-Content -LiteralPath $obsolete -Raw -ErrorAction SilentlyContinue
+        $obsoleteHasClaude = [bool]($obsoleteText -match '(?i)anthropic\.claude-code')
+    }
+    return [pscustomobject]@{
+        CodeCliPath = if ($codeCmd) { $codeCmd.Source } else { $null }
+        ExtensionsRoot = $extRoot
+        ExtensionsRootState = $extRootState.State
+        ExtensionsRootError = $extRootState.Error
+        ExtensionDirs = $dirs.ToArray()
+        ObsoletePath = $obsolete
+        ObsoleteState = $obsoleteState.State
+        ObsoleteError = $obsoleteState.Error
+        ObsoleteReferencesClaude = $obsoleteHasClaude
+    }
+}
+
+function Get-WindowsResidualSummary {
+    $pathEntries = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($scope in @('User', 'Machine')) {
+        $pathValue = [Environment]::GetEnvironmentVariable('PATH', $scope)
+        foreach ($entry in @($pathValue -split ';')) {
+            if ($entry -match '(?i)claude|anthropic|[\\/]\.local[\\/]bin$') {
+                $pathEntries.Add([pscustomobject]@{ Scope = $scope; Entry = $entry })
+            }
+        }
+    }
+    $envVarNames = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($scope in @('User', 'Machine')) {
+        foreach ($name in [Environment]::GetEnvironmentVariables($scope).Keys) {
+            if ($name -match '(?i)claude|anthropic') {
+                $envVarNames.Add([pscustomobject]@{ Scope = $scope; Name = $name })
+            }
+        }
+    }
+    $overridePaths = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($name in @('CLAUDE_CONFIG_DIR', 'CLAUDE_USER_DATA_DIR')) {
+        $val = [Environment]::GetEnvironmentVariable($name)
+        if ($val) { $overridePaths.Add([pscustomobject]@{ Name = $name; Value = $val }) }
+    }
+    $uninstallKeys = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
+        foreach ($key in (Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+            $value = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
+            if (-not $value -or -not $value.PSObject.Properties['DisplayName'] -or
+                -not $value.PSObject.Properties['Publisher']) { continue }
+            if ($value.DisplayName -match '(?i)^Claude( Code| Desktop)?$' -and $value.Publisher -match 'Anthropic') {
+                $uninstallKeys.Add($key.Name)
+            }
+        }
+    }
+    $protocolKeys = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($proto in @('HKCU:\Software\Classes\claude', 'HKLM:\Software\Classes\claude')) {
+        if ((Get-TargetPresenceState $proto).State -eq 'Present') { $protocolKeys.Add($proto) }
+    }
+    $aclPaths = @(
+        (Join-Path $env:USERPROFILE '.claude'),
+        (Join-Path $env:USERPROFILE '.local\share\claude'),
+        (Join-Path $env:USERPROFILE '.cache\claude'),
+        (Join-Path $env:APPDATA 'Claude'),
+        (Join-Path $env:LOCALAPPDATA 'Claude'),
+        (Join-Path $env:LOCALAPPDATA 'Packages\Claude_pzs8sxrjxfjjc')
+    )
+    $aclDiagnostics = @($aclPaths | ForEach-Object { Get-PathAclDiagnostics -Path $_ })
+
+    $nativePath = Join-Path $env:USERPROFILE '.local\bin\claude.exe'
+    $nativeInfo = $null
+    if ((Get-TargetPresenceState $nativePath).State -eq 'Present') {
+        $native = Get-Item -LiteralPath $nativePath -ErrorAction SilentlyContinue
+        if ($native) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $native.FullName
+            $nativeInfo = [pscustomobject]@{
+                Path = $native.FullName
+                Version = $native.VersionInfo.FileVersion
+                SignatureStatus = [string]$sig.Status
+                Company = $native.VersionInfo.CompanyName
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        NativeClaudeCode = $nativeInfo
+        NpmClaudePackages = @(Get-NpmClaudePackageInstallations)
+        VsCode = (Get-VsCodeClaudeDiscovery)
+        AppDataClassification = @(Get-AppDataClassification)
+        Shortcuts = @(Get-ClaudeShortcutResiduals)
+        PathEntries = $pathEntries.ToArray()
+        EnvironmentVariableNames = $envVarNames.ToArray()
+        PathOverrides = $overridePaths.ToArray()
+        UninstallKeys = $uninstallKeys.ToArray()
+        ProtocolKeys = $protocolKeys.ToArray()
+        AclDiagnostics = $aclDiagnostics
+    }
+}
+
+function Invoke-ClaudeAppxUninstall {
+    param([Parameter(Mandatory = $true)][string]$PackageFullName)
+    if ($PackageFullName -notmatch '^Claude_[^\\/\s]+__pzs8sxrjxfjjc$') {
+        throw "Unexpected MSIX package name: $PackageFullName"
+    }
+    Remove-AppxPackage -Package $PackageFullName -ErrorAction Stop -Confirm:$false
+}
+
+function Get-NpmCommand {
+    Get-Command npm.cmd -ErrorAction Stop
+}
+
+function Get-VsCodeCliCommand {
+    Get-Command code.cmd, code.exe, code -ErrorAction Stop | Select-Object -First 1
+}
+
+function Invoke-NpmClaudeUninstall {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackageName,
+        [Parameter(Mandatory = $true)][string]$PrefixPath
+    )
+    if ($PackageName -ne '@anthropic-ai/claude-code') {
+        throw "Refusing to uninstall unapproved npm package: $PackageName"
+    }
+    $npmCmd = Get-NpmCommand
+    $normalPrefix = Get-NormalPath $PrefixPath
+    Assert-NoLinkAncestors $normalPrefix
+    $output = & $npmCmd.Source uninstall -g '@anthropic-ai/claude-code' --prefix $normalPrefix 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ("npm uninstall failed (exit=$LASTEXITCODE): " + ($output | Out-String).Trim())
+    }
+}
+
+function Invoke-VsCodeExtensionUninstall {
+    param([Parameter(Mandatory = $true)][string]$ExtensionId)
+    if ($ExtensionId -ne 'anthropic.claude-code') {
+        throw "Refusing to uninstall unapproved VS Code extension: $ExtensionId"
+    }
+    $codeCmd = Get-VsCodeCliCommand
+    $output = & $codeCmd.Source --uninstall-extension 'anthropic.claude-code' 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ("VS Code extension uninstall failed (exit=$LASTEXITCODE): " + ($output | Out-String).Trim())
+    }
 }
 
 function Test-RemovableRoot {
@@ -1145,20 +1568,24 @@ function Get-CurrentCandidates {
         $warning = if ($decision -eq 'ReviewOnly') { 'Authentication role unverified; separate decision required.' } else { 'Fallback because the parent directory is blocked or under review.' }
         $items.Add((Get-Candidate -Id ('full-' + $row[0]) -Path $row[1] -Category $row[2] -Policy 'FullRemoval' -Decision $decision -Warning $warning))
     }
-    $extRoot = Join-Path $homePath '.vscode\extensions'
-    $extRootState = Get-TargetPresenceState $extRoot
-    if ($extRootState.State -eq 'Present') {
-        foreach ($ext in (Get-ChildItem -LiteralPath $extRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^anthropic\.claude-code-[0-9]' })) {
-            $metadata = Join-Path $ext.FullName 'package.json'
-            try {
-                $package = Get-Content -LiteralPath $metadata -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                if ($package.publisher -eq 'anthropic' -and $package.name -eq 'claude-code') {
-                    $items.Add((Get-Candidate -Id ('vscode-' + $ext.Name) -Path $ext.FullName -Category 'VS Code extension' -Policy 'FullRemoval' -Warning 'VS Code should be closed before removal.'))
-                }
-            } catch { continue }
+    $vsDiscovery = Get-VsCodeClaudeDiscovery
+    if ($vsDiscovery.ExtensionsRootState -eq 'Present') {
+        $hasCodeCli = [bool]$vsDiscovery.CodeCliPath
+        if ($hasCodeCli -and $vsDiscovery.ExtensionDirs.Count -gt 0) {
+            $items.Add((Get-Candidate -Id 'vscode-cli-anthropic.claude-code' -Path 'anthropic.claude-code' -Category 'VS Code extension (CLI)' -Policy 'FullRemoval' -Kind 'VsCodeExtension' -Identity $vsDiscovery.ExtensionsRoot -Warning 'Uses VS Code CLI (code --uninstall-extension anthropic.claude-code) so extensions.json/.obsolete stay consistent; VS Code should be closed.'))
         }
-    } elseif ($extRootState.State -eq 'Unknown') {
-        $items.Add((Get-Candidate -Id 'vscode-extensions-probe-blocked' -Path $extRoot -Category 'VS Code extension' -Policy 'FullRemoval' -Decision 'Blocked' -Warning ("Cannot probe VS Code extensions directory: $($extRootState.Error)")))
+        foreach ($ext in $vsDiscovery.ExtensionDirs) {
+            $extDecision = if ($hasCodeCli) { 'ReviewOnly' } else { 'Ready' }
+            $extWarning = if ($hasCodeCli) { 'Managed by VsCodeExtension CLI removal; review only if directory remains after code --uninstall-extension.' } else { 'VS Code should be closed before removal.' }
+            $items.Add((Get-Candidate -Id ('vscode-' + $ext.Name) -Path $ext.FullName -Category 'VS Code extension' -Policy 'FullRemoval' -Decision $extDecision -Warning $extWarning))
+        }
+    } elseif ($vsDiscovery.ExtensionsRootState -eq 'Unknown') {
+        $items.Add((Get-Candidate -Id 'vscode-extensions-probe-blocked' -Path $vsDiscovery.ExtensionsRoot -Category 'VS Code extension' -Policy 'FullRemoval' -Decision 'Blocked' -Warning ("Cannot probe VS Code extensions directory: $($vsDiscovery.ExtensionsRootError)")))
+    }
+    foreach ($npmPkg in (Get-NpmClaudePackageInstallations)) {
+        $npmDec = if ($npmPkg.SafeToUninstall) { 'Ready' } else { 'Blocked' }
+        $npmWarn = if ($npmPkg.SafeToUninstall) { 'Removes global @anthropic-ai/claude-code via npm uninstall without touching Node.js, npm, or unrelated packages.' } else { $npmPkg.BlockReason }
+        $items.Add((Get-Candidate -Id ('npm-claude-code-' + ([Math]::Abs($npmPkg.PrefixPath.GetHashCode()))) -Path $npmPkg.PackagePath -Category 'npm Claude Code package' -Policy 'FullRemoval' -Kind 'NpmPackage' -Decision $npmDec -Identity $npmPkg.PrefixPath -Warning $npmWarn))
     }
     try {
         $pkg = Get-ClaudeAppxPackage | Where-Object {
@@ -1175,15 +1602,10 @@ function Get-CurrentCandidates {
     } catch {
         $items.Add((Get-Candidate -Id 'appx-claude-query-blocked' -Path 'Claude_pzs8sxrjxfjjc' -Category 'Claude Desktop MSIX' -Policy 'FullRemoval' -Kind 'AppxPackage' -Decision 'Blocked' -Warning ('Unable to query MSIX package state: ' + $_.Exception.Message)))
     }
-    $obsolete = Join-Path $homePath '.vscode\extensions\.obsolete'
-    $obsoleteState = Get-TargetPresenceState $obsolete
-    if ($obsoleteState.State -eq 'Present') {
-        $obsoleteText = Get-Content -LiteralPath $obsolete -Raw -ErrorAction SilentlyContinue
-        if ($obsoleteText -match '(?i)anthropic\.claude-code') {
-            $items.Add((Get-Candidate -Id 'vscode-shared-obsolete' -Path $obsolete -Category 'Shared VS Code registration file' -Policy 'FullRemoval' -Decision 'ReviewOnly' -Warning 'Shared file; do not delete as a whole.'))
-        }
-    } elseif ($obsoleteState.State -eq 'Unknown') {
-        $items.Add((Get-Candidate -Id 'vscode-shared-obsolete' -Path $obsolete -Category 'Shared VS Code registration file' -Policy 'FullRemoval' -Decision 'Blocked' -Warning ("Cannot probe VS Code .obsolete file: $($obsoleteState.Error)")))
+    if ($vsDiscovery.ObsoleteState -eq 'Present' -and $vsDiscovery.ObsoleteReferencesClaude) {
+        $items.Add((Get-Candidate -Id 'vscode-shared-obsolete' -Path $vsDiscovery.ObsoletePath -Category 'Shared VS Code registration file' -Policy 'FullRemoval' -Decision 'ReviewOnly' -Warning 'Shared file; do not delete as a whole.'))
+    } elseif ($vsDiscovery.ObsoleteState -eq 'Unknown') {
+        $items.Add((Get-Candidate -Id 'vscode-shared-obsolete' -Path $vsDiscovery.ObsoletePath -Category 'Shared VS Code registration file' -Policy 'FullRemoval' -Decision 'Blocked' -Warning ("Cannot probe VS Code .obsolete file: $($vsDiscovery.ObsoleteError)")))
     }
     $pivotRoot = Join-Path $local 'Packages'
     foreach ($pivot in (Get-ChildItem -LiteralPath $pivotRoot -Directory -Force -ErrorAction SilentlyContinue |
@@ -1269,6 +1691,12 @@ function Get-ArtifactRecord {
             $status = 'Blocked'
             $reason = 'Cannot inspect registry key: ' + $_.Exception.Message
         }
+    } elseif ($Candidate.Kind -eq 'NpmPackage') {
+        $identity = $Candidate.Identity
+        if ($Candidate.Decision -eq 'Blocked') { $reason = $Candidate.Warning }
+    } elseif ($Candidate.Kind -eq 'VsCodeExtension') {
+        $identity = $Candidate.Identity
+        if ($Candidate.Decision -eq 'Blocked') { $reason = $Candidate.Warning }
     } elseif ($Candidate.Kind -eq 'AppxPackage' -and $Candidate.Decision -eq 'Blocked') {
         $reason = $Candidate.Warning
     }
@@ -1410,6 +1838,22 @@ function Get-EnvironmentReport {
             $lines.Add('Scheduled task candidate: ' + $task.TaskPath + $task.TaskName)
         }
     }
+    $summary = Get-WindowsResidualSummary
+    foreach ($npmItem in $summary.NpmClaudePackages) {
+        $lines.Add(('npm Claude package candidate: {0}; version={1}; prefix={2}; safe={3}' -f
+            $npmItem.PackagePath, $npmItem.Version, $npmItem.PrefixPath, $npmItem.SafeToUninstall))
+    }
+    foreach ($sc in $summary.Shortcuts) {
+        $lines.Add(('Shortcut candidate (report only): {0} -> {1}' -f $sc.ShortcutPath, $sc.TargetPath))
+    }
+    foreach ($proto in $summary.ProtocolKeys) {
+        $lines.Add('Protocol registration candidate (report only): ' + $proto)
+    }
+    foreach ($acl in $summary.AclDiagnostics) {
+        if ($acl.State -eq 'Absent') { continue }
+        $lines.Add(('ACL diagnostic (read-only): {0}; status={1}; owner={2}; currentUserOwner={3}' -f
+            $acl.Path, $acl.Status, $acl.Owner, $acl.IsCurrentUserOwner))
+    }
     try {
         $wslRaw = (wsl.exe --list --verbose 2>&1 | Out-String)
         $wslExit = $LASTEXITCODE
@@ -1517,7 +1961,7 @@ function Read-AuthorizedPlanDocument {
     $seenKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($rec in $records) {
         if ($rec.Policy -notin @('AccountData', 'FullRemoval')) { throw "Invalid manifest policy: $($rec.Policy)" }
-        if ($rec.Kind -notin @('Filesystem', 'AppxPackage', 'RegistryKey')) { throw "Invalid manifest kind: $($rec.Kind)" }
+        if ($rec.Kind -notin @('Filesystem', 'AppxPackage', 'RegistryKey', 'NpmPackage', 'VsCodeExtension')) { throw "Invalid manifest kind: $($rec.Kind)" }
         if ($rec.Decision -notin @('Ready', 'ReviewOnly', 'Blocked')) { throw "Invalid manifest decision: $($rec.Decision)" }
         $key = "$($rec.Policy)|$($rec.Id)"
         if (-not $seenKeys.Add($key)) { throw "Duplicate manifest entry: $key" }
@@ -1663,6 +2107,31 @@ function Get-RecordPresenceState {
     if ($Record.Kind -eq 'Filesystem' -or $Record.Kind -eq 'RegistryKey') {
         return (Get-TargetPresenceState $Record.Path)
     }
+    if ($Record.Kind -eq 'NpmPackage') {
+        return (Get-TargetPresenceState (Join-Path $Record.Path 'package.json'))
+    }
+    if ($Record.Kind -eq 'VsCodeExtension') {
+        $extRoot = [string]$Record.Identity
+        if ([string]::IsNullOrWhiteSpace($extRoot)) {
+            return [pscustomobject]@{ State = 'Unknown'; Error = 'Missing VS Code extensions root identity.' }
+        }
+        $rootState = Get-TargetPresenceState $extRoot
+        if ($rootState.State -ne 'Present') { return $rootState }
+        try {
+            $found = $false
+            foreach ($dir in (Get-ChildItem -LiteralPath $extRoot -Directory -Force -ErrorAction Stop | Where-Object { $_.Name -match '^anthropic\.claude-code-[0-9]' })) {
+                $metaPath = Join-Path $dir.FullName 'package.json'
+                if ((Get-TargetPresenceState $metaPath).State -eq 'Present') {
+                    $pkg = Get-Content -LiteralPath $metaPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                    if ($pkg.publisher -eq 'anthropic' -and $pkg.name -eq 'claude-code') { $found = $true; break }
+                }
+            }
+            $st = if ($found) { 'Present' } else { 'Absent' }
+            return [pscustomobject]@{ State = $st; Error = '' }
+        } catch {
+            return [pscustomobject]@{ State = 'Unknown'; Error = $_.Exception.Message }
+        }
+    }
     if ($Record.Kind -eq 'AppxPackage') {
         try {
             $found = [bool](Get-ClaudeAppxPackage | Where-Object {
@@ -1733,6 +2202,22 @@ function Assert-CurrentRecord {
         if ($regItem.SubKeyCount -ne 0) { throw "Registry key unexpectedly contains subkeys: $($Record.Id)" }
         $currentValue = [string]$regItem.GetValue('')
         if ($currentValue -ne [string]$Record.Identity) { throw "Registry value changed after planning: $($Record.Id)" }
+    } elseif ($Record.Kind -eq 'NpmPackage') {
+        $null = Assert-AuthorizedPath -Path $Record.Path -AllowedRoots @($matching[0].Path)
+        $pkgJson = Join-Path $Record.Path 'package.json'
+        $pkgPres = Get-TargetPresenceState $pkgJson
+        if ($pkgPres.State -ne 'Present') { throw "npm Claude package is missing or inaccessible: $($Record.Id)" }
+        $pkgObj = Get-Content -LiteralPath $pkgJson -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($pkgObj.name -ne '@anthropic-ai/claude-code') { throw "Unexpected npm package identity: $($pkgObj.name)" }
+        if ([string]::IsNullOrWhiteSpace([string]$Record.Identity)) { throw "Missing npm prefix identity: $($Record.Id)" }
+        $null = Get-NpmCommand
+    } elseif ($Record.Kind -eq 'VsCodeExtension') {
+        if ($Record.Path -ne 'anthropic.claude-code') { throw "Unexpected VS Code extension ID: $($Record.Path)" }
+        if ([string]::IsNullOrWhiteSpace([string]$Record.Identity)) { throw "Missing VS Code extensions root identity: $($Record.Id)" }
+        $null = Assert-AuthorizedPath -Path ([string]$Record.Identity) -AllowedRoots @([string]$Record.Identity)
+        $null = Get-VsCodeCliCommand
+        $extPres = Get-RecordPresenceState -Record $Record
+        if ($extPres.State -ne 'Present') { throw "VS Code extension is missing or inaccessible: $($Record.Id)" }
     } else {
         throw "Unsupported action kind: $($Record.Kind)"
     }
@@ -1793,7 +2278,7 @@ function Invoke-CleanupApply {
     if ($null -eq $CandidatesOverride) {
         $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(?i:claude)(-|$)' })
         if ($running.Count -gt 0) { throw 'Claude is running. Shut it down normally and retry.' }
-        if ($Policy -eq 'FullRemoval' -and @($selected | Where-Object { $_.Id -like 'vscode-*' }).Count -gt 0) {
+        if ($Policy -eq 'FullRemoval' -and @($selected | Where-Object { $_.Id -like 'vscode-*' -or $_.Kind -eq 'VsCodeExtension' }).Count -gt 0) {
             $vscode = @(Get-Process -Name Code -ErrorAction SilentlyContinue)
             if ($vscode.Count -gt 0) { throw 'VS Code is running. Shut it down normally before removing its Claude extension.' }
         }
@@ -1904,7 +2389,7 @@ function Invoke-CleanupApply {
                     })
                 }
             } elseif ($record.Kind -eq 'AppxPackage') {
-                Remove-AppxPackage -Package $record.Path -ErrorAction Stop -Confirm:$false
+                Invoke-ClaudeAppxUninstall -PackageFullName $record.Path
                 $pres = Get-RecordPresenceState -Record $record
                 if ($pres.State -ne 'Absent') {
                     throw "Appx package post-removal verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
@@ -1920,6 +2405,30 @@ function Invoke-CleanupApply {
                 $pres = Get-RecordPresenceState -Record $record
                 if ($pres.State -ne 'Absent') {
                     throw "Registry key post-deletion verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
+                }
+                $succeededCount++
+                $results.Add([pscustomobject]@{
+                    Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
+                    Status = 'Removed'; ItemsRemoved = 1; ItemsFailed = 0; PartialRemoval = $false
+                    RemainingExists = $false; PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
+                })
+            } elseif ($record.Kind -eq 'NpmPackage') {
+                Invoke-NpmClaudeUninstall -PackageName '@anthropic-ai/claude-code' -PrefixPath ([string]$record.Identity)
+                $pres = Get-RecordPresenceState -Record $record
+                if ($pres.State -ne 'Absent') {
+                    throw "npm package post-uninstall verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
+                }
+                $succeededCount++
+                $results.Add([pscustomobject]@{
+                    Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
+                    Status = 'Removed'; ItemsRemoved = 1; ItemsFailed = 0; PartialRemoval = $false
+                    RemainingExists = $false; PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
+                })
+            } elseif ($record.Kind -eq 'VsCodeExtension') {
+                Invoke-VsCodeExtensionUninstall -ExtensionId $record.Path
+                $pres = Get-RecordPresenceState -Record $record
+                if ($pres.State -ne 'Absent') {
+                    throw "VS Code extension post-uninstall verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
                 }
                 $succeededCount++
                 $results.Add([pscustomobject]@{
@@ -2026,21 +2535,35 @@ function Invoke-CleanupVerify {
     }
 }
 
+function Get-StructuredAuditReport {
+    return [pscustomobject]@{
+        SchemaVersion = 3
+        Mode = 'Audit'
+        GeneratedUtc = [DateTime]::UtcNow.ToString('o')
+        WindowsUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        PowerShellVersion = $PSVersionTable.PSVersion.ToString()
+        Summary = (Get-WindowsResidualSummary)
+        EnvironmentLines = @(Get-EnvironmentReport)
+        Inventory = @(Get-Inventory)
+    }
+}
+
 function Show-Help {
     @'
 ClaudeCleanup.ps1 - native Windows Claude cleanup utility
 
-  .\ClaudeCleanup.ps1 -Audit
-  .\ClaudeCleanup.ps1 -Plan
+  .\ClaudeCleanup.ps1 -Audit [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Plan [-OutputFormat Text|Json]
   .\ClaudeCleanup.ps1 -Apply -Policy AccountData -ApprovedManifestSha256 <64-hex-hash> -WhatIf
-  .\ClaudeCleanup.ps1 -Apply -Policy FullRemoval -ApprovedManifestSha256 <64-hex-hash>
-  .\ClaudeCleanup.ps1 -Verify
+  .\ClaudeCleanup.ps1 -Apply -Policy FullRemoval -ApprovedManifestSha256 <64-hex-hash> [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Verify [-OutputFormat Text|Json]
   .\ClaudeCleanup.ps1 -Help
 
 Audit and Verify inspect without deleting. Plan writes only CLEANUP-PLAN.md in this project.
 Apply requires a separately approved, unchanged SchemaVersion 3 plan hash and one policy; each
 approved manifest hash can be applied at most once (preview with -WhatIf does not consume it).
-Apply permanently removes only Ready entries via handle-bound Win32 APIs after preflight and
+Apply permanently removes only Ready entries via handle-bound Win32 APIs or official uninstall
+handlers (Remove-AppxPackage, npm uninstall, code --uninstall-extension) after preflight and
 confirmation. It does not change WSL, browser profiles, device IDs, telemetry, proxy settings,
 or unrelated software. Credential Manager entries need separate authorization and are not removed
 by this version. No backup or quarantine is made.
@@ -2052,12 +2575,20 @@ if ($MyInvocation.InvocationName -ne '.') {
     if ($modeCount -ne 1) { throw 'Choose exactly one mode: -Audit, -Plan, -Apply, -Verify, or -Help.' }
     if ($Help) { Show-Help; return }
     if ($Audit) {
+        if ($OutputFormat -eq 'Json') {
+            Get-StructuredAuditReport | ConvertTo-Json -Depth 10 | Write-Output
+            return
+        }
         Get-EnvironmentReport | Write-Output
         Get-Inventory | Format-Table Policy, Category, Path, SizeBytes, Ownership, Decision, Reason -AutoSize | Out-String -Width 260 | Write-Output
         return
     }
     if ($Plan) {
         $planResult = Invoke-CleanupPlan -PlanPath $script:PlanPath -WhatIf:$WhatIfPreference
+        if ($OutputFormat -eq 'Json') {
+            $planResult | ConvertTo-Json -Depth 6 | Write-Output
+            return
+        }
         if ($planResult.WhatIf) {
             Write-Output "WhatIf: would write $($planResult.PlanPath) with $($planResult.Entries) candidate entries."
             return
@@ -2068,8 +2599,19 @@ if ($MyInvocation.InvocationName -ne '.') {
         return
     }
     if ($Verify) {
-        Get-EnvironmentReport | Write-Output
         $ver = Invoke-CleanupVerify -PlanPath $script:PlanPath -VerificationPath $script:VerificationPath
+        if ($OutputFormat -eq 'Json') {
+            [pscustomobject]@{
+                SchemaVersion = 3
+                Mode = 'Verify'
+                GeneratedUtc = [DateTime]::UtcNow.ToString('o')
+                Summary = (Get-WindowsResidualSummary)
+                EnvironmentLines = @(Get-EnvironmentReport)
+                Verify = $ver
+            } | ConvertTo-Json -Depth 10 | Write-Output
+            return
+        }
+        Get-EnvironmentReport | Write-Output
         Write-Output 'Current Claude candidate inventory (read-only):'
         $ver.CurrentInventory | Format-Table Policy, Category, Path, Decision -AutoSize | Out-String -Width 240 | Write-Output
         if ($ver.PlanError) {
@@ -2094,10 +2636,16 @@ if ($MyInvocation.InvocationName -ne '.') {
         if (-not $Policy -or -not $ApprovedManifestSha256) { throw '-Apply requires -Policy and -ApprovedManifestSha256.' }
         $authPreview = Read-AuthorizedPlanDocument -PlanPath $script:PlanPath -ApprovedHash $ApprovedManifestSha256
         $previewTargets = @($authPreview.Records | Where-Object { $_.Policy -eq $Policy -and $_.Decision -eq 'Ready' })
-        foreach ($record in $previewTargets) {
-            Write-Output ("Target: {0}; category={1}; kind={2}; path={3}" -f $record.Id, $record.Category, $record.Kind, $record.Path)
+        if ($OutputFormat -ne 'Json') {
+            foreach ($record in $previewTargets) {
+                Write-Output ("Target: {0}; category={1}; kind={2}; path={3}" -f $record.Id, $record.Category, $record.Kind, $record.Path)
+            }
         }
         $applyResult = Invoke-CleanupApply -Policy $Policy -ApprovedManifestSha256 $ApprovedManifestSha256 -PlanPath $script:PlanPath -VerificationPath $script:VerificationPath -WhatIf:$WhatIfPreference -Confirm:$ConfirmPreference
+        if ($OutputFormat -eq 'Json') {
+            $applyResult | ConvertTo-Json -Depth 10 | Write-Output
+            return
+        }
         if ($applyResult.Outcome -eq 'PreviewOnly') {
             Write-Output 'Preview only; no deletion performed.'
             return
