@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess = $true)]
+﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$InstallRoot,
     [string]$SourceRoot,
@@ -8,11 +8,37 @@ param(
     [string[]]$SkillTarget,
     [string]$AgentHomeRoot,
     [string]$SkillSourcePath,
-    [switch]$Force
+    [switch]$Force,
+    [ValidateSet('Auto', 'zh-CN', 'en-US')]
+    [string]$Language = 'Auto'
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+function Initialize-ToolkitUtf8Encoding {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $script:OutputEncoding = $utf8NoBom
+    $global:OutputEncoding = $utf8NoBom
+    try { [Console]::OutputEncoding = $utf8NoBom } catch {}
+}
+
+function Resolve-ToolkitLanguage {
+    param([string]$RequestedLanguage = 'Auto')
+
+    if ($RequestedLanguage -eq 'zh-CN' -or $RequestedLanguage -eq 'en-US') {
+        return $RequestedLanguage
+    }
+    try {
+        if ([System.Globalization.CultureInfo]::CurrentUICulture.Name -like 'zh*') {
+            return 'zh-CN'
+        }
+    } catch {}
+    return 'en-US'
+}
+
+Initialize-ToolkitUtf8Encoding
+$script:ResolvedToolkitLanguage = Resolve-ToolkitLanguage -RequestedLanguage $Language
 
 $script:ToolkitManifestFileName = '.claude-cleanup-install.json'
 $script:SkillManifestFileName = '.claude-cleanup-skill-install.json'
@@ -236,6 +262,8 @@ function Get-ToolkitPayloadSpec {
         'scripts\Uninstall-ClaudeCleanup.ps1'
     )
     $optionalRelPaths = @(
+        'ClaudeCleanupGUI.cmd',
+        'scripts\ClaudeCleanupGUI.ps1',
         'README.md',
         'README_zh-CN.md',
         'docs\gui-evaluation.md'
@@ -672,8 +700,16 @@ function Invoke-ToolkitInstallAction {
         }
     }
 
+    $resolvedLang = Resolve-ToolkitLanguage -RequestedLanguage $script:ResolvedToolkitLanguage
+    $noticeText = if ($resolvedLang -eq 'zh-CN') {
+        '工具安装/技能部署仅管理本工具文件，绝不会修改 Windows 系统本身或删除 Claude 软件/用户数据。'
+    } else {
+        'Toolkit and Skill installation never alters Windows OS or modifies Claude applications/user data.'
+    }
     return [pscustomobject]@{
         Action = 'Install'
+        Language = $resolvedLang
+        Notice = $noticeText
         Toolkit = $toolkitResult
         Skills = $skillResults.ToArray()
         ClaudeApplicationModified = $false

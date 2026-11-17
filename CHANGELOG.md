@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Stage H — Native Desktop GUI, Bilingual Runtime (`zh-CN`/`en-US`), & Post-Ban Residual Positioning**:
+  - Added zero-dependency native WinForms Desktop GUI ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) + [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)) with live **中 / EN** switching, OS-safety badge, 5-category scope checklist, disabled-until-ready cleanup button, explicit `-WhatIf` + SHA-256 confirmation dialog, and report viewer.
+  - Added `-Language Auto|zh-CN|en-US` (with Chinese locale auto-detection and UTF-8 console output) plus `-SaveAuditReport` across [ClaudeCleanup.ps1](ClaudeCleanup.ps1), [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1) (adding `[6] Launch GUI` & `[L] Switch Lang`), and [Install/Update/Uninstall-ClaudeCleanup.ps1](scripts/Install-ClaudeCleanup.ps1), while keeping JSON schema keys strictly invariant.
+  - Added bilingual and GUI validation test suite [tests/BilingualAndGui.Tests.ps1](tests/BilingualAndGui.Tests.ps1).
 - **Stage D — Cross-Agent Skill Package**: Added canonical [skills/claude-cleanup/](skills/claude-cleanup/) (`SKILL.md`, `references/permissions-and-risks.md`, `references/agent-installation.md`) and `tests/SkillPackage.Tests.ps1` supporting Codex CLI, Antigravity CLI, Gemini CLI, and Claude Code with read-only `-Audit` default and SHA-256 authorization gates.
 - **Stage E — Windows Console Launcher & User-Scoped Lifecycle Scripts**: Added `ClaudeCleanupLauncher.cmd`, `scripts/ClaudeCleanupLauncher.ps1`, `scripts/Install-ClaudeCleanup.ps1`, `scripts/Update-ClaudeCleanup.ps1`, `scripts/Uninstall-ClaudeCleanup.ps1`, `docs/gui-evaluation.md`, and sandboxed `tests/ToolkitInstall.Tests.ps1`.
 - **Stage F — Documentation, CI, and Sanitized Release Packaging**: Added `docs/` guides and sanitized `docs/examples/*.sample.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `LICENSE` (MIT), `NOTICE`, `.github/workflows/ci.yml`, `scripts/New-ReleasePackage.ps1`, and `tests/ToolkitCiChecks.Tests.ps1`.

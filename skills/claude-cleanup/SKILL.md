@@ -12,6 +12,8 @@ description: >-
 
 Use this skill to operate the native PowerShell backend (`ClaudeCleanup.ps1`) safely across **Codex CLI**, **Antigravity CLI**, **Gemini CLI**, and **Claude Code**.
 
+**Product Positioning**: Designed specifically as a non-destructive Windows utility to scan and safely clean residual Claude account/device metadata, auth tokens, session caches, and leftover extension/registry entries after a Claude account ban — **strictly without altering or harming Windows OS itself** (and never tampering with OS hardware IDs, telemetry, or remote account records). Defaults to read-only `-Audit` and supports `-Language Auto|zh-CN|en-US`.
+
 ## Non-Negotiable Safety Rules
 
 1. **Single Backend Only (Zero Duplicated Deletion Logic)**:

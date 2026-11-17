@@ -2,38 +2,36 @@
 
 # Windows Claude Cleanup Toolkit
 
-用于 Windows 平台的 Claude Code 与 Claude Desktop 本地数据**只读审计**、**哈希绑定规划**及**用户明确授权清理**的原生 PowerShell 工具。
+专用于 Windows 平台的**无破坏性本地残余清理与原生桌面工具**：针对 Claude 账号被封禁（Ban）后遗留的本地账号/设备元数据、授权缓存、会话存储、扩展与注册残余进行**只读扫描与受控安全清理** —— **绝不改动或损害 Windows 操作系统本身**。
 
 ---
 
 ## 1. 项目简介
 
-本工具用于排查并清理当前 Windows 用户下与 Claude Code 及 Claude Desktop 相关的本地安装、配置、缓存、诊断日志、VS Code 扩展、MSIX 包及浏览器 Native Messaging 注册项。工具将只读审计（`-Audit`）、清单规划（`-Plan`）、预览/确认执行（`-Apply`）与独立核验（`-Verify`）严格分离，不会修改设备标识、代理、遥测、浏览器站点数据或 WSL 发行版。
+本工具专为清理 Windows 用户目录下与 Claude Code 及 Claude Desktop 相关的封号后本地残留而设计，覆盖 Claude Code CLI 配置、Claude Desktop 本地存储、VS Code/Cursor/Windsurf 扩展、MSIX 包、环境变量名、Windows Credential Manager 条目计数以及浏览器 Native Messaging 注册项。工具将只读审计（`-Audit`）、清单规划（`-Plan`）、预览/确认执行（`-Apply`）与独立核验（`-Verify`）严格分离，**绝不改动 Windows 系统文件、无关软件、浏览器个人数据、操作系统硬件/设备 ID 或 WSL 发行版**。
 
-所有清理与核验操作均通过经过严格测试的原生 PowerShell 核心引擎（[ClaudeCleanup.ps1](ClaudeCleanup.ps1)）执行。工具支持直接使用 CLI 命令行、交互式控制台菜单启动器（[ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)）或跨代理 Skill（[skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)）调用。
+所有检测与清理操作均通过单一经过严格测试的核心引擎（[ClaudeCleanup.ps1](ClaudeCleanup.ps1)）执行，并原生支持 **简体中文 / English 双语无缝切换（`-Language Auto|zh-CN|en-US`）**。您可通过零外部依赖的 **Windows 原生桌面 GUI（[ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) / [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)）**、安全菜单启动器（[ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)）、PowerShell CLI 或跨代理 Skill（[skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)）运行本工具。
 
 ## 2. 当前发布状态
 
-- **开发阶段**：候选发布阶段（Release Candidate，A 至 F 阶段功能已完整实现，并在 Windows PowerShell 5.1 与 PowerShell 7+ 双环境完成验证）。
-- **真实清理状态**：开发与测试期间**未授权、也未执行**任何真实 Claude 数据删除。所有实际删除操作均需要用户对清单 SHA-256 哈希与策略进行明确确认。
+- **开发阶段**：候选发布阶段（Release Candidate，Stages A–H 已完整实现并在 Windows PowerShell 5.1 与 PowerShell 7+ 双环境完成验证）。
+- **真实清理状态**：开发与测试期间**未授权、也未执行**任何真实 Claude 数据删除。默认严格为只读审计模式；所有实际删除操作均须用户明确批准清单 SHA-256 哈希与清理策略。
 - **仓库状态**：当前为私有开发仓库（`main` 分支）。
 
 ## 3. 功能特性与限制
 
 ### 已实现能力
-- **只读环境与候选审计（`-Audit`）**：覆盖原生及 npm 全局安装版 Claude Code CLI（通过 `npm`、`.npmrc`、`NPM_CONFIG_PREFIX`、`%APPDATA%\npm` 解析前缀）、Claude Desktop、VS Code / Cursor / Windsurf Claude 扩展、MSIX 包、开始菜单/桌面/启动项 `.lnk` 快捷方式、相关服务/定时任务、环境变量**仅名称**（仅输出 `Scope` 与 `Name`，绝不读取秘密值）、`PATH` 残留项、Credential Manager 目标计数（不读取秘密值）、AppData 角色分类、路径 ACL/所有者/重解析点诊断以及 WSL 只读状态报告。
-- **结构化 JSON 输出（`-OutputFormat Json`）**：在 `-Audit`、`-Plan`、`-Verify` 与 `-Apply` 模式下均支持机器可读 JSON 输出（`SchemaVersion = 3`），便于流水线自动化与智能体 Skill 集成。
-- **确定性清单生成（`-Plan`）**：输出 `CLEANUP-PLAN.md`，标注 `Ready` / `ReviewOnly` / `Blocked` 决策，并记录 NTFS `VolumeSerialNumber`、`FileIndex` 及子树最大修改时间戳 `MaxLastWriteUtcTicks`。
-- **Win32 句柄绑定文件删除**：文件系统目标使用 `FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS` 打开句柄，强制核验子树各级当前用户 `OwnerSid`，严格拒绝重解析点（junction/符号链接），通过 `SetFileInformationByHandle` 执行底层删除，**绝不回退到路径版 `Remove-Item`**。
-- **受控包卸载器（仅 `FullRemoval`）**：严格限定作用域执行 `npm uninstall -g @anthropic-ai/claude-code`、`code --uninstall-extension anthropic.claude-code` 与 MSIX `Remove-AppxPackage`，并在卸载后执行 fail-closed 存在性核验。
-- **跨代理 Skill（`skills/claude-cleanup/`）**：提供规范智能体技能包（[SKILL.md](skills/claude-cleanup/SKILL.md)），兼容 Codex CLI、Antigravity CLI、Gemini CLI 与 Claude Code，强制只读 `-Audit` 默认行为、严格 SHA-256 授权卡点、零重复删除逻辑，并将 REA 严格限定为开发期可选静态分析工具。
-- **安全控制台菜单启动器**：提供批处理包装器（[ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)）与文本菜单脚本（[scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1)），支持 Audit、Plan、查看本地报告、Verify 与 Help 功能，无 `-ExecutionPolicy Bypass`、无自动 UAC 提权、绝不自动执行 `-Apply`。
-- **用户级生命周期管理**：提供专用安装（[scripts/Install-ClaudeCleanup.ps1](scripts/Install-ClaudeCleanup.ps1)）、更新（[scripts/Update-ClaudeCleanup.ps1](scripts/Update-ClaudeCleanup.ps1)）与卸载（[scripts/Uninstall-ClaudeCleanup.ps1](scripts/Uninstall-ClaudeCleanup.ps1)）脚本，严格区分清理工具本身、智能体技能以及 Claude 软件的存在性。
-- **发布打包与 CI 矩阵**：提供发布打包脚本（[scripts/New-ReleasePackage.ps1](scripts/New-ReleasePackage.ps1)）与 GitHub Actions 工作流（[.github/workflows/ci.yml](.github/workflows/ci.yml)），在 `windows-latest` 上全自动化测试 Windows PowerShell 5.1 与 PowerShell 7。
-- **完备文档体系**：覆盖 [CLI 命令参考](docs/CLI-Reference.md)、[启动器与安装指南](docs/Launcher-and-Install.md)、[智能体技能指南](docs/Agent-Skill-Guide.md)、[卸载指南](docs/Uninstallation-Guide.md)、[故障排查与兼容性](docs/Troubleshooting-and-Compatibility.md)、[样例报告](docs/examples/)、[安全策略](SECURITY.md)、[贡献指南](CONTRIBUTING.md)、[更新日志](CHANGELOG.md)、[开源许可证](LICENSE) 以及 [项目声明](NOTICE)。
+- **封号残余扫描与白名单安全清理**：覆盖 Claude Code CLI 配置与元数据（`.claude`、`.claude.json`、`.local\bin\claude.exe`、npm `@anthropic-ai/claude-code`）、Claude Desktop 本地缓存与 MSIX（`%APPDATA%\Claude`、`%LOCALAPPDATA%\Claude`、`Claude_pzs8sxrjxfjjc`）、VS Code/Cursor/Windsurf 扩展（`anthropic.claude-code`）及 HKCU 浏览器注册表键、快捷方式、环境变量**仅名称**（绝不读取秘密值）、`PATH` 残留、Credential Manager 目标计数（不读取或删除秘密值）、AppData 分类、ACL/所有者/重解析点只读诊断及 WSL 只读报告。
+- **双语运行时切换（`-Language Auto|zh-CN|en-US`）**：在中文 Windows 系统下通过 `Auto` 自动启用简体中文，或手动在 `zh-CN` / `en-US` 间切换；自动配置 UTF-8 控制台防乱码，并本地化 `AUDIT.md`、`CLEANUP-PLAN.md`、`VERIFICATION.md` Markdown 报告（保持 JSON Schema 键名严格不变）。
+- **零依赖 Windows 原生桌面 GUI（[ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd)）**：基于系统内置 WinForms（[scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)），顶部带 **中 / EN** 一键切换按钮与系统安全徽章，提供 5 类目标范围勾选面板、分步按钮（`1. 仅扫描体检`、`2. 生成清理方案`、扫描规划前禁用的 `3. 执行安全清理` 配合 `-WhatIf` 预览与精确路径确认弹窗、`4. 核验清理结果`）以及 `AUDIT.md` / `CLEANUP-PLAN.md` 快捷查看。
+- **结构化 JSON 输出（`-OutputFormat Json`）**：在 `-Audit`、`-Plan`、`-Verify` 与 `-Apply` 模式下输出 `SchemaVersion = 3` 规范 JSON，键名在任意语言下保持稳定不变。
+- **确定性清单与 Win32 句柄绑定删除**：生成带 GUID 与 SHA-256 的 `CLEANUP-PLAN.md`；基于 `FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS` 打开句柄并校验全树 `OwnerSid` 后通过 `SetFileInformationByHandle` 删除，**绝不回退 `Remove-Item`**。
+- **受控包卸载器（仅 `FullRemoval`）**：严格限定 `@anthropic-ai/claude-code`、`anthropic.claude-code` 与 `Claude_pzs8sxrjxfjjc` 并执行 fail-closed 后置核验。
+- **跨代理 Skill（`skills/claude-cleanup/`）**：兼容 Codex CLI、Antigravity CLI、Gemini CLI 与 Claude Code，默认只读 `-Audit` 且不复制任何删除代码。
+- **安全菜单启动器与用户级生命周期脚本**：[ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd) 与 [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1)（含 `[L]` 切换语言与 `[6]` 启动图形界面），配合 [scripts/Install-ClaudeCleanup.ps1](scripts/Install-ClaudeCleanup.ps1)、[scripts/Update-ClaudeCleanup.ps1](scripts/Update-ClaudeCleanup.ps1) 与 [scripts/Uninstall-ClaudeCleanup.ps1](scripts/Uninstall-ClaudeCleanup.ps1)。
+- **发布打包、CI 与完整文档体系**：[scripts/New-ReleasePackage.ps1](scripts/New-ReleasePackage.ps1)、[.github/workflows/ci.yml](.github/workflows/ci.yml)、[docs/](docs/) 全套手册与样例、[SECURITY.md](SECURITY.md)、[CONTRIBUTING.md](CONTRIBUTING.md)、[CHANGELOG.md](CHANGELOG.md)、[LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
 ### 规划中能力（尚未实现）
-- **可选图形界面（GUI）**：已在 [docs/gui-evaluation.md](docs/gui-evaluation.md) 完成可行性评估；为保持极简依赖，GUI 实现延后至后续里程碑（Stage E+）。
 - **真实主机环境清理验证（Stage G）**：需用户针对真实数据环境进行独立明确授权。
 
 ## 4. 支持的 Windows 版本
@@ -69,21 +67,28 @@ powershell.exe -NoProfile -File .\scripts\Install-ClaudeCleanup.ps1 -InstallSkil
 
 ## 7. 快速开始
 
-### 使用安全控制台启动器（推荐非技术用户）
+### 使用原生 Windows 桌面图形界面（推荐）
+直接双击 [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) 或在 PowerShell 中运行：
+```cmd
+.\ClaudeCleanupGUI.cmd
+```
+界面支持顶部 **中 / EN** 实时切换、5 类封号残余目标勾选、默认只读 **仅扫描体检**、**生成清理方案**、双重确认后的 **执行安全清理**，以及一键 **核验清理结果**。
+
+### 使用安全控制台菜单启动器
 在命令提示符或 PowerShell 中直接运行：
 ```cmd
 .\ClaudeCleanupLauncher.cmd
 ```
-通过数字菜单即可执行只读审计、生成清理计划、查看本地报告及校验系统状态，无需输入任何复杂参数。
+通过数字菜单即可切换语言（`[L]`）、启动图形界面（`[6]`）、执行只读审计、生成清理计划、查看本地报告及校验系统状态，无需输入任何复杂参数。
 
 ### 直接使用 PowerShell CLI
-在本项目根目录的 PowerShell 中运行：
+在本项目根目录的 PowerShell 中运行（默认 `-Language Auto` 自动识别中文 Windows，也可显式切换）：
 ```powershell
-.\ClaudeCleanup.ps1 -Help
-.\ClaudeCleanup.ps1 -Audit
-.\ClaudeCleanup.ps1 -Plan
+.\ClaudeCleanup.ps1 -Help -Language zh-CN
+.\ClaudeCleanup.ps1 -Audit -Language zh-CN
+.\ClaudeCleanup.ps1 -Plan -Language zh-CN
 ```
-在审阅审计结果以及 `CLEANUP-PLAN.md` 中的每条路径与 SHA-256 哈希之前，不要进行任何执行操作。
+在审阅 `AUDIT.md`（可附加 `-SaveAuditReport` 导出）以及 `CLEANUP-PLAN.md` 中的每条路径与 SHA-256 哈希之前，不要进行任何执行操作。
 
 ## 8. CLI 命令参考
 
@@ -91,13 +96,13 @@ powershell.exe -NoProfile -File .\scripts\Install-ClaudeCleanup.ps1 -InstallSkil
 
 | 命令 | 用途 | 磁盘写入行为 |
 | :--- | :--- | :--- |
-| `.\ClaudeCleanup.ps1 -Help` | 显示用法与安全边界说明 | 无写入 |
-| `.\ClaudeCleanup.ps1 -Audit [-OutputFormat Text\|Json]` | 只读检查系统环境、ACL/AppData 诊断与候选清单 | 无写入 |
-| `.\ClaudeCleanup.ps1 -Plan [-OutputFormat Text\|Json]` | 生成 `CLEANUP-PLAN.md`（`SchemaVersion = 3`） | 仅写入 `CLEANUP-PLAN.md` |
+| `.\ClaudeCleanup.ps1 -Help [-Language Auto\|zh-CN\|en-US]` | 显示用法与安全边界说明 | 无写入 |
+| `.\ClaudeCleanup.ps1 -Audit [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json] [-SaveAuditReport]` | 只读检查系统环境、ACL/AppData 诊断与候选清单 | 无写入（仅 `-SaveAuditReport` 时写 `AUDIT.md`） |
+| `.\ClaudeCleanup.ps1 -Plan [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json]` | 生成 `CLEANUP-PLAN.md`（`SchemaVersion = 3`） | 仅写入 `CLEANUP-PLAN.md` |
 | `.\ClaudeCleanup.ps1 -Plan -WhatIf` | 预览规划条目数但不落盘 | 无写入 |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希> [-OutputFormat Text\|Json] -WhatIf` | 干跑预览获批策略下的执行目标 | 无写入、不消耗哈希 |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希> [-OutputFormat Text\|Json]` | 经交互确认后执行 `Ready` 目标 | 删除获批目标并更新 `VERIFICATION.md` 台账 |
-| `.\ClaudeCleanup.ps1 -Verify [-OutputFormat Text\|Json]` | 只读核验当前状态、清单与执行台账 | 无写入 |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希> [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json] -WhatIf` | 干跑预览获批策略下的执行目标 | 无写入、不消耗哈希 |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64位哈希> [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json]` | 经交互确认后执行 `Ready` 目标 | 删除获批目标并更新 `VERIFICATION.md` 台账 |
+| `.\ClaudeCleanup.ps1 -Verify [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json]` | 只读核验当前状态、清单与执行台账 | 无写入 |
 
 ## 9. Audit / Plan / Apply / Verify 工作流
 
@@ -166,6 +171,10 @@ pwsh.exe -NoProfile -File .\tests\ToolkitInstall.Tests.ps1
 # CI 检查与发布打包测试
 powershell.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
+
+# 双语切换与原生 Windows GUI 非破坏验证
+powershell.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
+pwsh.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
 ```
 
 - **权限与授权说明**：在 Windows 上创建符号链接需要管理员权限或开发者模式（`SeCreateSymbolicLinkPrivilege`），非特权会话会将对应符号链接创建用例明确标为 `SKIP`（不计入通过）；若在禁用 `FSCTL_SET_REPARSE_POINT` 的沙箱内运行，junction 创建也会相应跳过；未经单独授权的真实 HKCU 写入、跨 SID 磁盘测试以及真实 `npm` / `code` / `Remove-AppxPackage` 卸载执行均明确标为 `NotExecuted`。
@@ -189,10 +198,11 @@ pwsh.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
 
 支持的代理平台包括 Codex CLI（`~/.codex/skills/` 或共享 `~/.agents/skills/`）、Antigravity CLI（`~/.gemini/config/skills/`）、Gemini CLI（`~/.gemini/skills/`）与 Claude Code（`~/.claude/skills/`）。该技能仅调用经过验证的 `ClaudeCleanup.ps1` 后端，默认只读审计，严禁自动触发 `-Apply`，且不以 REA 作为运行时依赖。
 
-## 17. Windows 启动器与 GUI 评估
+## 17. 原生 Windows 桌面 GUI 与启动器架构
 
-- **控制台菜单启动器**：通过 [ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd) 与 [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1) 提供面向普通用户的交互式文本菜单（详见 [启动器与安装指南](docs/Launcher-and-Install.md)）。
-- **GUI 薄包装可行性评估**：可选 WPF/XAML 界面方案已在 [docs/gui-evaluation.md](docs/gui-evaluation.md) 完成技术评估，为确保轻量与极简依赖，当前阶段暂不引入编译型 GUI 二进制。
+- **原生桌面图形界面（[ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) + [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)）**：零外部依赖的 WinForms 桌面程序，支持 **中 / EN** 实时切换、分类目标范围勾选、默认只读体检、清理前按钮锁定以及精确路径 + SHA-256 确认弹窗后委托 [ClaudeCleanup.ps1](ClaudeCleanup.ps1) 执行。
+- **控制台菜单启动器（[ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd) + [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1)）**：提供双语文本菜单并支持输入 `[6]` 直接拉起桌面 GUI（详见 [启动器与安装指南](docs/Launcher-and-Install.md)）。
+- **GUI 安全设计与实现说明**：架构边界与安全约束见 [docs/gui-evaluation.md](docs/gui-evaluation.md)。
 
 ## 18. 如何卸载 Claude
 

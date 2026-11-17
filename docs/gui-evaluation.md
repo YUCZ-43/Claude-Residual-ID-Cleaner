@@ -1,15 +1,15 @@
-# Optional Future GUI Thin-Wrapper Feasibility Evaluation
+# Native Windows Desktop GUI Architecture & Security Record
 
-**Status:** Evaluation Only (`Planned` / Stage E+; **not implemented** in the current release)  
+**Status:** Implemented in Stage H ([ClaudeCleanupGUI.cmd](../ClaudeCleanupGUI.cmd) + [ClaudeCleanupGUI.ps1](../scripts/ClaudeCleanupGUI.ps1))  
 **Backend Contract:** [ClaudeCleanup.ps1](../ClaudeCleanup.ps1)  
-**Current Non-Technical Entrypoint:** [ClaudeCleanupLauncher.cmd](../ClaudeCleanupLauncher.cmd) + [ClaudeCleanupLauncher.ps1](../scripts/ClaudeCleanupLauncher.ps1)  
+**Console Entrypoint:** [ClaudeCleanupLauncher.cmd](../ClaudeCleanupLauncher.cmd) + [ClaudeCleanupLauncher.ps1](../scripts/ClaudeCleanupLauncher.ps1)  
 **Project Documentation:** [README.md](../README.md) | [README_zh-CN.md](../README_zh-CN.md)
 
 ---
 
 ## 1. Purpose and Scope
 
-This document evaluates whether an optional graphical user interface (GUI) thin wrapper should be built on top of [ClaudeCleanup.ps1](../ClaudeCleanup.ps1) in a future milestone (Stage E+), and defines the mandatory architectural, security, and maintainability constraints if one is pursued.
+This document defines the architectural rationale and mandatory security constraints for the **zero-dependency native Windows Desktop GUI** ([ClaudeCleanupGUI.cmd](../ClaudeCleanupGUI.cmd) / [scripts/ClaudeCleanupGUI.ps1](../scripts/ClaudeCleanupGUI.ps1)) designed for scanning and safely removing residual local Claude account/device metadata, auth tokens, session caches, and extension state left behind after a Claude account ban — **strictly without altering or harming Windows OS itself**.
 
 Core non-negotiable invariant:
 - **Single Tested Backend:** All path validation, handle-bound deletion (`SetFileInformationByHandle`), registry deletion (`NtDeleteKey`), `SchemaVersion = 3` manifest signing/verification, and atomic ledger checks remain exclusively inside [ClaudeCleanup.ps1](../ClaudeCleanup.ps1). Any future GUI must act solely as a presentation and explicit-confirmation shell invoking `ClaudeCleanup.ps1` out-of-process with `-OutputFormat Json` and `-File` (never duplicating deletion logic).
@@ -70,10 +70,7 @@ If a thin GUI wrapper is implemented in a future stage, it **must** enforce all 
 
 ---
 
-## 5. Recommendation and Go / No-Go Criteria
+## 5. Stage H Implementation Summary
 
-- **Recommendation:** **Defer GUI implementation** until after Stage D (Cross-Agent Skill) and Stage F (CI, documentation, and release packaging) are complete. Keep [ClaudeCleanupLauncher.cmd](../ClaudeCleanupLauncher.cmd) + [ClaudeCleanupLauncher.ps1](../scripts/ClaudeCleanupLauncher.ps1) as the supported nontechnical entrypoint in Stage E.
-- **Trigger to Revisit (Go Criteria for Stage E+):**
-  1. Core backend coverage (Stages A–C), Agent Skill (Stage D), and CI matrix (Stage F) are stable and passing on both Windows PowerShell 5.1 and PowerShell 7+.
-  2. Real-world user feedback indicates that the text menu launcher and generated `AUDIT.md` / `CLEANUP-PLAN.md` / `VERIFICATION.md` tables are insufficient for nontechnical users.
-  3. Any prototype is scoped strictly as a PowerShell + WPF read-only/preview-first thin wrapper over `ClaudeCleanup.ps1 -OutputFormat Json`, with dedicated Pester/sandbox tests verifying zero duplicated deletion logic.
+- **Chosen Implementation:** Native .NET WinForms desktop UI ([ClaudeCleanupGUI.cmd](../ClaudeCleanupGUI.cmd) + [scripts/ClaudeCleanupGUI.ps1](../scripts/ClaudeCleanupGUI.ps1)), avoiding compiled binaries, WebView2/Electron runtimes, and SmartScreen friction while running cleanly on stock Windows 10/11 under both Windows PowerShell 5.1 and PowerShell 7+.
+- **Mandatory Security Verification:** Verified via [tests/BilingualAndGui.Tests.ps1](../tests/BilingualAndGui.Tests.ps1) that `scripts/ClaudeCleanupGUI.ps1` duplicates zero deletion APIs (`Remove-Item`, `SetFileInformationByHandle`, `NtDeleteKey` remain strictly in [ClaudeCleanup.ps1](../ClaudeCleanup.ps1)), starts `Clean Selected` disabled until `Scan` + `Preview Plan` complete, mandates `-WhatIf` preview + explicit confirmation dialog, and toggles cleanly between `zh-CN` and `en-US`.

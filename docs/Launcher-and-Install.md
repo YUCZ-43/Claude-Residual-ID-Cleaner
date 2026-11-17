@@ -3,7 +3,7 @@
 **Project:** Windows Claude Cleanup Toolkit  
 **Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
 **Language Navigation:** [English](../README.md) | [简体中文](../README_zh-CN.md)  
-**Document Status:** Implemented (Portable Mode, Console Launcher, and User-Scoped Installer/Updater/Uninstaller)
+**Document Status:** Implemented (Portable Mode, Native Windows Desktop GUI, Bilingual Console Launcher, and User-Scoped Installer/Updater/Uninstaller)
 
 ---
 
@@ -67,26 +67,28 @@ In the current release, the toolkit is completely portable and requires no admin
 
 ---
 
-## 4. Windows Console Launcher / Windows 安全启动器
+## 4. Native Windows Desktop GUI & Bilingual Console Launcher / 原生桌面 GUI 与安全启动器
 
-To support nontechnical users and streamline safe operations without installing an AI agent, the toolkit includes a lightweight text-menu launcher:
+To support nontechnical users without installing an AI agent, the toolkit provides both a zero-dependency **WinForms Desktop GUI** and a lightweight **bilingual text-menu launcher**, supporting seamless `zh-CN` / `en-US` switching (`-Language Auto|zh-CN|en-US`) for cleaning Claude banned-account local residuals without altering Windows OS itself:
 
-### Implemented Files
+### Implemented Entrypoints
+- **`ClaudeCleanupGUI.cmd` + `scripts/ClaudeCleanupGUI.ps1`**: Native Windows Desktop GUI featuring a live **中 / EN** language toggle button, OS-safety badge, categorized target checklist (Claude Code CLI, Claude Desktop, VS Code/Cursor extensions, read-only Credential Manager counts, read-only Env Var names), disabled-until-ready **Clean Selected** confirmation flow (`-WhatIf` + explicit path dialog), and `AUDIT.md` / `CLEANUP-PLAN.md` quick buttons.
 - **`ClaudeCleanupLauncher.cmd`**: A minimal batch launcher at the repository/install root that locates `pwsh.exe` or falls back to `powershell.exe`.
-- **`scripts/ClaudeCleanupLauncher.ps1`**: An interactive text-mode menu script (also supporting `-Action` / non-interactive smoke checks).
+- **`scripts/ClaudeCleanupLauncher.ps1`**: An interactive bilingual text-mode menu script (supporting `-Language Auto|zh-CN|en-US`, `-Action`, `-Exit` smoke mode, and `[6] Launch GUI`).
 
 ```text
 ======================================================
-         Windows Claude Cleanup Console Menu
+ Claude Residual ID Cleanup - Safe Console Menu
 ======================================================
-  [1] Run Audit (Read-only discovery)
-  [2] Generate Cleanup Plan (CLEANUP-PLAN.md)
-  [3] View Reports (Audit & Plan summaries)
-  [4] Run Verification (Verify post-cleanup state)
-  [5] Show Help & Safety Guidelines
-  [6] Exit
+  [1] Audit        - Read-only Claude residual discovery
+  [2] Plan         - Generate CLEANUP-PLAN.md (SchemaVersion 3)
+  [3] View Reports - Inspect local AUDIT / PLAN / VERIFICATION
+  [4] Verify       - Check residual state and execution ledger
+  [5] Help         - CLI usage and safety boundaries
+  [6] Launch GUI   - Launch native Windows Desktop GUI (中/EN)
+  [7] Exit         - Close launcher
+  [L] Switch Lang  - Switch interface (zh-CN <-> en-US)
 ======================================================
-Select an option [1-6]:
 ```
 
 ### Enforced Safety Guardrails

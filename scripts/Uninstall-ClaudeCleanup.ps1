@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess = $true)]
+﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$InstallRoot,
     [switch]$UninstallSkill,
@@ -6,7 +6,9 @@ param(
     [ValidateSet('Codex', 'Antigravity', 'Gemini', 'Claude', 'Agents', 'All')]
     [string[]]$SkillTarget,
     [string]$AgentHomeRoot,
-    [switch]$RemoveReports
+    [switch]$RemoveReports,
+    [ValidateSet('Auto', 'zh-CN', 'en-US')]
+    [string]$Language = 'Auto'
 )
 
 Set-StrictMode -Version 2.0
@@ -18,6 +20,7 @@ $reqSkillOnly = [bool]$SkillOnly
 $reqSkillTarget = $SkillTarget
 $reqAgentHomeRoot = $AgentHomeRoot
 $reqRemoveReports = [bool]$RemoveReports
+$reqLanguage = $Language
 
 $helperPath = Join-Path $PSScriptRoot 'Install-ClaudeCleanup.ps1'
 if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) {
@@ -155,8 +158,16 @@ foreach ($item in $skillPlanItems) {
     }
 }
 
+$resolvedLang = Resolve-ToolkitLanguage -RequestedLanguage $reqLanguage
+$noticeText = if ($resolvedLang -eq 'zh-CN') {
+    '仅卸载本清理工具及受管脚本/技能包，绝不会卸载 Claude 软件或改动 Windows 系统本身。'
+} else {
+    'Removes only this cleanup toolkit or skill manifests without uninstalling Claude applications or altering Windows OS.'
+}
 [pscustomobject]@{
     Action = 'Uninstall'
+    Language = $resolvedLang
+    Notice = $noticeText
     Toolkit = $toolkitResult
     Skills = $skillResults.ToArray()
     ClaudeApplicationModified = $false

@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess = $true)]
+﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$InstallRoot,
     [string]$SourceRoot,
@@ -7,7 +7,9 @@ param(
     [ValidateSet('Codex', 'Antigravity', 'Gemini', 'Claude', 'Agents', 'All')]
     [string[]]$SkillTarget,
     [string]$AgentHomeRoot,
-    [string]$SkillSourcePath
+    [string]$SkillSourcePath,
+    [ValidateSet('Auto', 'zh-CN', 'en-US')]
+    [string]$Language = 'Auto'
 )
 
 Set-StrictMode -Version 2.0
@@ -20,6 +22,7 @@ $reqSkillOnly = [bool]$SkillOnly
 $reqSkillTarget = $SkillTarget
 $reqAgentHomeRoot = $AgentHomeRoot
 $reqSkillSourcePath = $SkillSourcePath
+$reqLanguage = $Language
 
 $helperPath = Join-Path $PSScriptRoot 'Install-ClaudeCleanup.ps1'
 if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) {
@@ -203,8 +206,16 @@ foreach ($item in $skillPlanItems) {
     }
 }
 
+$resolvedLang = Resolve-ToolkitLanguage -RequestedLanguage $reqLanguage
+$noticeText = if ($resolvedLang -eq 'zh-CN') {
+    '工具升级仅更新受管工具文件并保留本地报告，绝不会修改 Windows 系统本身或 Claude 数据。'
+} else {
+    'Toolkit update replaces managed toolkit files and preserves local reports without altering Windows OS or Claude data.'
+}
 [pscustomobject]@{
     Action = 'Update'
+    Language = $resolvedLang
+    Notice = $noticeText
     Toolkit = $toolkitResult
     Skills = $skillResults.ToArray()
     ClaudeApplicationModified = $false

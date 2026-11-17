@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+﻿[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
     [switch]$Audit,
     [switch]$Plan,
@@ -7,13 +7,93 @@ param(
     [switch]$Help,
     [ValidateSet('AccountData', 'FullRemoval')][string]$Policy,
     [ValidatePattern('^[A-Fa-f0-9]{64}$')][string]$ApprovedManifestSha256,
-    [ValidateSet('Text', 'Json')][string]$OutputFormat = 'Text'
+    [ValidateSet('Text', 'Json')][string]$OutputFormat = 'Text',
+    [ValidateSet('Auto', 'zh-CN', 'en-US')][string]$Language = 'Auto',
+    [switch]$SaveAuditReport
 )
 
 Set-StrictMode -Version 2.0
 $script:ProjectRoot = $PSScriptRoot
 $script:PlanPath = Join-Path $PSScriptRoot 'CLEANUP-PLAN.md'
+$script:AuditPath = Join-Path $PSScriptRoot 'AUDIT.md'
 $script:VerificationPath = Join-Path $PSScriptRoot 'VERIFICATION.md'
+
+function Initialize-Utf8ConsoleEncoding {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $script:OutputEncoding = $utf8NoBom
+    $global:OutputEncoding = $utf8NoBom
+    try { [Console]::OutputEncoding = $utf8NoBom } catch {}
+    try { [Console]::InputEncoding = $utf8NoBom } catch {}
+}
+
+function Resolve-UiLanguage {
+    param([string]$RequestedLanguage = $Language)
+
+    if ($RequestedLanguage -eq 'zh-CN' -or $RequestedLanguage -eq 'en-US') {
+        return $RequestedLanguage
+    }
+    try {
+        $uiName = [System.Globalization.CultureInfo]::CurrentUICulture.Name
+        if ($uiName -like 'zh*') {
+            return 'zh-CN'
+        }
+    } catch {}
+    return 'en-US'
+}
+
+$script:ActiveLanguage = Resolve-UiLanguage -RequestedLanguage $Language
+
+function Get-LocalizedUiText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [string]$Lang = $script:ActiveLanguage
+    )
+
+    $isZh = ($Lang -eq 'zh-CN')
+    switch ($Key) {
+        'PositioningTagline' {
+            if ($isZh) { return '专用于扫描并安全清理 Claude 账号封禁后遗留的本地账号/设备元数据、授权缓存、会话与扩展残留 —— 绝不改动或损害 Windows 系统本身。' }
+            return 'Non-destructive Windows utility specifically designed to scan and clean residual Claude account/device metadata, auth tokens, session caches, and leftover extension/registry entries after a Claude account ban — strictly without altering or harming Windows OS itself.'
+        }
+        'SafetyDisclaimer' {
+            if ($isZh) { return '安全边界：默认仅执行只读审计；仅清理白名单内的 Claude 残余项目，绝不修改操作系统文件、无关应用、WSL、硬件/系统设备 ID 或远端服务器账号状态。' }
+            return 'Safety boundary: Default mode is strictly read-only Audit; cleanup targets only allowlisted Claude residuals and never modifies Windows OS files, unrelated apps, WSL, OS device IDs, or remote server-side account state.'
+        }
+        'PlanTitle' {
+            if ($isZh) { return '# Windows Claude 封号残余数据清理方案 (CLEANUP-PLAN)' }
+            return '# Windows Claude cleanup plan'
+        }
+        'PlanIdPrefix' {
+            if ($isZh) { return '计划 ID: ' }
+            return 'Plan ID: '
+        }
+        'PlanGeneratedPrefix' {
+            if ($isZh) { return '生成时间 (UTC): ' }
+            return 'Generated: '
+        }
+        'PlanRule1' {
+            if ($isZh) { return '当前尚未执行任何删除。仅 Decision=Ready 的条目在明确批准本文件精确 SHA-256 哈希与单一清理策略后可执行清理。' }
+            return 'No deletion has been performed. Only Decision=Ready entries can be applied after explicit approval of this exact file hash and one policy.'
+        }
+        'PlanRule2' {
+            if ($isZh) { return 'ReviewOnly 与 Blocked 条目已被自动排除；缺失路径已省略；Windows 操作系统文件、WSL 与浏览器个人配置绝不被修改。' }
+            return 'ReviewOnly and Blocked entries are excluded. Missing paths are omitted. WSL and browser site data are excluded.'
+        }
+        'PlanTableHeader' {
+            if ($isZh) { return '| 清理策略 | 条目 ID | 类别 | 目标路径或包名 | 大小(字节) | 决策 | 原因 / 警告 |' }
+            return '| Policy | ID | Category | Path or package | Size (bytes) | Decision | Reason / warning |'
+        }
+        'AuditTitle' {
+            if ($isZh) { return '# Windows Claude 账号封号残余数据只读审计报告 (AUDIT)' }
+            return '# Windows Claude Residual ID Audit Report'
+        }
+        'VerificationTitle' {
+            if ($isZh) { return '# 执行核验报告与账本' }
+            return '# Execution verification log'
+        }
+        default { return $Key }
+    }
+}
 
 if (-not ('ClaudeCleanup.NativeFs' -as [type])) {
     $nativeSource = @'
@@ -1887,10 +1967,69 @@ function Get-EnvironmentReport {
     return $lines.ToArray()
 }
 
+function Write-AuditReportDocument {
+    param(
+        [string]$AuditPath = $script:AuditPath,
+        [string]$Lang = $script:ActiveLanguage,
+        [AllowNull()][object]$StructuredReport = $null
+    )
+    $report = if ($null -ne $StructuredReport) { $StructuredReport } else { Get-StructuredAuditReport }
+    $isZh = ($Lang -eq 'zh-CN')
+    $title = Get-LocalizedUiText -Key 'AuditTitle' -Lang $Lang
+    $tagline = Get-LocalizedUiText -Key 'PositioningTagline' -Lang $Lang
+    $safety = Get-LocalizedUiText -Key 'SafetyDisclaimer' -Lang $Lang
+    $body = New-Object 'System.Collections.Generic.List[string]'
+    $body.Add($title)
+    $body.Add('')
+    $body.Add('> ' + $tagline)
+    $body.Add('> ' + $safety)
+    $body.Add('')
+    if ($isZh) {
+        $body.Add('生成时间 (UTC): ' + $report.GeneratedUtc)
+        $body.Add('PowerShell 版本: ' + $report.PowerShellVersion)
+        $body.Add('环境变量值策略: 仅列出 Scope 与 Name，绝不读取或保存环境变量秘密值或 Credential Manager 密码。')
+        $body.Add('')
+        $body.Add('## 环境与残留核查摘要')
+    } else {
+        $body.Add('Generated (UTC): ' + $report.GeneratedUtc)
+        $body.Add('PowerShell Version: ' + $report.PowerShellVersion)
+        $body.Add('Secret Handling: Environment variables list Scope and Name only; secret values and Credential Manager secrets are never read or saved.')
+        $body.Add('')
+        $body.Add('## Environment & Residual Summary')
+    }
+    foreach ($line in @($report.EnvironmentLines)) {
+        $body.Add('- ' + [string]$line)
+    }
+    $body.Add('')
+    if ($isZh) {
+        $body.Add('## 候选清理项列表')
+        $body.Add('')
+        $body.Add('| 策略 | 类别 | 目标路径或包名 | 类型 | 大小(字节) | 决策 | 说明 |')
+        $body.Add('| :--- | :--- | :--- | :--- | ---: | :--- | :--- |')
+    } else {
+        $body.Add('## Candidate Inventory')
+        $body.Add('')
+        $body.Add('| Policy | Category | Path or package | Kind | Size (bytes) | Decision | Reason |')
+        $body.Add('| :--- | :--- | :--- | :--- | ---: | :--- | :--- |')
+    }
+    foreach ($item in @($report.Inventory)) {
+        $sz = if ($null -eq $item.PSObject.Properties['SizeBytes'] -or $null -eq $item.SizeBytes) { 'unknown' } else { [string]$item.SizeBytes }
+        $reasonText = if ($item.PSObject.Properties['Reason']) { ([string]$item.Reason).Replace('|', '\|').Replace("`r", ' ').Replace("`n", ' ') } else { '' }
+        $body.Add(('| {0} | {1} | `{2}` | {3} | {4} | {5} | {6} |' -f $item.Policy, $item.Category, ([string]$item.Path).Replace('|', '\|'), $item.Kind, $sz, $item.Decision, $reasonText))
+    }
+    $parentDir = Split-Path -Parent $AuditPath
+    if ($parentDir -and -not (Test-Path -LiteralPath $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
+    [IO.File]::WriteAllLines($AuditPath, [string[]]$body.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    return (Get-Sha256 -Path $AuditPath)
+}
+
 function Write-PlanDocument {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Records,
-        [string]$PlanPath = $script:PlanPath
+        [string]$PlanPath = $script:PlanPath,
+        [string]$Lang = $script:ActiveLanguage
     )
     $manifest = [pscustomobject]@{
         SchemaVersion = 3
@@ -1902,14 +2041,15 @@ function Write-PlanDocument {
     }
     $json = ConvertTo-Json -InputObject $manifest -Depth 12
     $body = @(
-        '# Windows Claude cleanup plan',
+        (Get-LocalizedUiText -Key 'PlanTitle' -Lang $Lang),
         '',
-        ('Plan ID: ' + $manifest.PlanId),
-        ('Generated: ' + $manifest.GeneratedUtc),
-        'No deletion has been performed. Only Decision=Ready entries can be applied after explicit approval of this exact file hash and one policy.',
-        'ReviewOnly and Blocked entries are excluded. Missing paths are omitted. WSL and browser site data are excluded.',
+        ((Get-LocalizedUiText -Key 'PlanIdPrefix' -Lang $Lang) + $manifest.PlanId),
+        ((Get-LocalizedUiText -Key 'PlanGeneratedPrefix' -Lang $Lang) + $manifest.GeneratedUtc),
+        ('> ' + (Get-LocalizedUiText -Key 'PositioningTagline' -Lang $Lang)),
+        (Get-LocalizedUiText -Key 'PlanRule1' -Lang $Lang),
+        (Get-LocalizedUiText -Key 'PlanRule2' -Lang $Lang),
         '',
-        '| Policy | ID | Category | Path or package | Size (bytes) | Decision | Reason / warning |',
+        (Get-LocalizedUiText -Key 'PlanTableHeader' -Lang $Lang),
         '| --- | --- | --- | --- | ---: | --- | --- |'
     )
     foreach ($record in @($Records)) {
@@ -1990,7 +2130,7 @@ function Get-ExecutionLedgerEntries {
     $beginCount = ([regex]::Matches($text, '<!-- EXECUTION-LEDGER-BEGIN -->')).Count
     $endCount = ([regex]::Matches($text, '<!-- EXECUTION-LEDGER-END -->')).Count
     if ($beginCount -eq 0 -and $endCount -eq 0) {
-        if ($text -match 'EXECUTION-LEDGER' -or $text -match '(?m)^# Execution verification log\b') {
+        if ($text -match 'EXECUTION-LEDGER' -or $text -match '(?m)^# (?:Execution verification log|执行核验报告与账本)\b') {
             throw 'Execution ledger appears truncated or corrupted.'
         }
         return @()
@@ -2053,7 +2193,7 @@ function Save-ExecutionLedgerEntry {
         $baseContent = [regex]::Replace($baseContent, '(?s)\r?\n?<!-- EXECUTION-LEDGER-BEGIN -->.*?<!-- EXECUTION-LEDGER-END -->\r?\n?', '')
         $baseContent = $baseContent.TrimEnd()
     } else {
-        $baseContent = '# Execution verification log'
+        $baseContent = (Get-LocalizedUiText -Key 'VerificationTitle' -Lang $script:ActiveLanguage)
     }
 
     $ledgerJson = ConvertTo-Json -InputObject @($list.ToArray()) -Depth 12
@@ -2554,38 +2694,74 @@ function Get-StructuredAuditReport {
 }
 
 function Show-Help {
+    param([string]$Lang = $script:ActiveLanguage)
+
+    if ($Lang -eq 'zh-CN') {
+        @'
+ClaudeCleanup.ps1 - Windows Claude 账号封号残余 ID 与缓存安全清理工具
+
+  .\ClaudeCleanup.ps1 -Audit [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json] [-SaveAuditReport]
+  .\ClaudeCleanup.ps1 -Plan [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Apply -Policy AccountData -ApprovedManifestSha256 <64位哈希> -WhatIf
+  .\ClaudeCleanup.ps1 -Apply -Policy FullRemoval -ApprovedManifestSha256 <64位哈希> [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Verify [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Help [-Language Auto|zh-CN|en-US]
+
+产品定位与安全边界:
+  专用于扫描并安全清理 Claude 账号封禁后遗留的本地账号/设备元数据、授权缓存、会话缓存、扩展及残留注册项，
+  绝不改动或损害 Windows 操作系统本身。默认模式严格为只读审计（-Audit）。
+  -Plan 仅生成本地 CLEANUP-PLAN.md。-Apply 必须由用户明确批准精确的 64 位 SHA-256 哈希与单一清理策略
+  （AccountData 或 FullRemoval），且每份已批清单最多可执行一次真实删除（-WhatIf 预览不消耗授权）。
+  不会修改 WSL、浏览器站点数据、系统硬件/设备 ID、系统遥测、代理设置或无关软件，亦无自动备份/回收站。
+'@ | Write-Output
+        return
+    }
     @'
-ClaudeCleanup.ps1 - native Windows Claude cleanup utility
+ClaudeCleanup.ps1 - Windows Claude Banned-Account Residual ID & Cache Cleanup Utility
 
-  .\ClaudeCleanup.ps1 -Audit [-OutputFormat Text|Json]
-  .\ClaudeCleanup.ps1 -Plan [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Audit [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json] [-SaveAuditReport]
+  .\ClaudeCleanup.ps1 -Plan [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
   .\ClaudeCleanup.ps1 -Apply -Policy AccountData -ApprovedManifestSha256 <64-hex-hash> -WhatIf
-  .\ClaudeCleanup.ps1 -Apply -Policy FullRemoval -ApprovedManifestSha256 <64-hex-hash> [-OutputFormat Text|Json]
-  .\ClaudeCleanup.ps1 -Verify [-OutputFormat Text|Json]
-  .\ClaudeCleanup.ps1 -Help
+  .\ClaudeCleanup.ps1 -Apply -Policy FullRemoval -ApprovedManifestSha256 <64-hex-hash> [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Verify [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
+  .\ClaudeCleanup.ps1 -Help [-Language Auto|zh-CN|en-US]
 
-Audit and Verify inspect without deleting. Plan writes only CLEANUP-PLAN.md in this project.
-Apply requires a separately approved, unchanged SchemaVersion 3 plan hash and one policy; each
-approved manifest hash can be applied at most once (preview with -WhatIf does not consume it).
-Apply permanently removes only Ready entries via handle-bound Win32 APIs or official uninstall
-handlers (Remove-AppxPackage, npm uninstall, code --uninstall-extension) after preflight and
-confirmation. It does not change WSL, browser profiles, device IDs, telemetry, proxy settings,
-or unrelated software. Credential Manager entries need separate authorization and are not removed
-by this version. No backup or quarantine is made.
+Product Positioning & Safety Boundaries:
+  Specifically designed as a non-destructive Windows utility to scan and safely clean residual Claude
+  account/device metadata, auth caches, session storage, extensions, and leftover registrations after
+  a Claude account ban — strictly without altering or harming the Windows OS itself.
+  Audit and Verify inspect without deleting (read-only default). Plan writes only CLEANUP-PLAN.md.
+  Apply requires a separately approved, unchanged SchemaVersion 3 plan hash and one policy; each
+  approved manifest hash can be applied at most once (preview with -WhatIf does not consume it).
+  It does not modify WSL, browser profiles, OS hardware/device IDs, telemetry, proxy settings,
+  or unrelated software. Credential Manager entries are audited by target count only. No backup is made.
 '@ | Write-Output
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
+    Initialize-Utf8ConsoleEncoding
+    $script:ActiveLanguage = Resolve-UiLanguage -RequestedLanguage $Language
+    $isZh = ($script:ActiveLanguage -eq 'zh-CN')
     $modeCount = @($Audit, $Plan, $Apply, $Verify, $Help | Where-Object { $_ }).Count
-    if ($modeCount -ne 1) { throw 'Choose exactly one mode: -Audit, -Plan, -Apply, -Verify, or -Help.' }
-    if ($Help) { Show-Help; return }
+    if ($modeCount -ne 1) {
+        if ($isZh) { throw '请仅选择一个运行模式: -Audit、-Plan、-Apply、-Verify 或 -Help。' }
+        throw 'Choose exactly one mode: -Audit, -Plan, -Apply, -Verify, or -Help.'
+    }
+    if ($Help) { Show-Help -Lang $script:ActiveLanguage; return }
     if ($Audit) {
+        $auditReport = Get-StructuredAuditReport
+        if ($SaveAuditReport) {
+            $null = Write-AuditReportDocument -AuditPath $script:AuditPath -Lang $script:ActiveLanguage -StructuredReport $auditReport
+        }
         if ($OutputFormat -eq 'Json') {
-            Get-StructuredAuditReport | ConvertTo-Json -Depth 10 | Write-Output
+            $auditReport | ConvertTo-Json -Depth 10 | Write-Output
             return
         }
+        Write-Output (Get-LocalizedUiText -Key 'PositioningTagline' -Lang $script:ActiveLanguage)
+        Write-Output (Get-LocalizedUiText -Key 'SafetyDisclaimer' -Lang $script:ActiveLanguage)
+        Write-Output ''
         Get-EnvironmentReport | Write-Output
-        Get-Inventory | Format-Table Policy, Category, Path, SizeBytes, Ownership, Decision, Reason -AutoSize | Out-String -Width 260 | Write-Output
+        $auditReport.Inventory | Format-Table Policy, Category, Path, SizeBytes, Ownership, Decision, Reason -AutoSize | Out-String -Width 260 | Write-Output
         return
     }
     if ($Plan) {
@@ -2595,12 +2771,19 @@ if ($MyInvocation.InvocationName -ne '.') {
             return
         }
         if ($planResult.WhatIf) {
-            Write-Output "WhatIf: would write $($planResult.PlanPath) with $($planResult.Entries) candidate entries."
+            if ($isZh) { Write-Output "WhatIf 预览: 将写入 $($planResult.PlanPath)，共 $($planResult.Entries) 个候选项。" }
+            else { Write-Output "WhatIf: would write $($planResult.PlanPath) with $($planResult.Entries) candidate entries." }
             return
         }
-        Write-Output "Plan: $($planResult.PlanPath)"
-        Write-Output "SHA256: $($planResult.Sha256)"
-        Write-Output "Entries: $($planResult.Entries); Ready: $($planResult.Ready); ReviewOnly/Blocked: $($planResult.NonReady)"
+        if ($isZh) {
+            Write-Output "清理方案已生成: $($planResult.PlanPath)"
+            Write-Output "SHA256: $($planResult.Sha256)"
+            Write-Output "条目统计: 共 $($planResult.Entries) 项；Ready(可执行): $($planResult.Ready)；ReviewOnly/Blocked(受保护/跳过): $($planResult.NonReady)"
+        } else {
+            Write-Output "Plan: $($planResult.PlanPath)"
+            Write-Output "SHA256: $($planResult.Sha256)"
+            Write-Output "Entries: $($planResult.Entries); Ready: $($planResult.Ready); ReviewOnly/Blocked: $($planResult.NonReady)"
+        }
         return
     }
     if ($Verify) {
@@ -2609,6 +2792,7 @@ if ($MyInvocation.InvocationName -ne '.') {
             [pscustomobject]@{
                 SchemaVersion = 3
                 Mode = 'Verify'
+                Language = $script:ActiveLanguage
                 GeneratedUtc = [DateTime]::UtcNow.ToString('o')
                 Summary = (Get-WindowsResidualSummary)
                 EnvironmentLines = @(Get-EnvironmentReport)
@@ -2616,21 +2800,28 @@ if ($MyInvocation.InvocationName -ne '.') {
             } | ConvertTo-Json -Depth 10 | Write-Output
             return
         }
+        Write-Output (Get-LocalizedUiText -Key 'PositioningTagline' -Lang $script:ActiveLanguage)
+        Write-Output ''
         Get-EnvironmentReport | Write-Output
-        Write-Output 'Current Claude candidate inventory (read-only):'
+        if ($isZh) { Write-Output '当前 Claude 残余候选项（只读检测）:' }
+        else { Write-Output 'Current Claude candidate inventory (read-only):' }
         $ver.CurrentInventory | Format-Table Policy, Category, Path, Decision -AutoSize | Out-String -Width 240 | Write-Output
         if ($ver.PlanError) {
-            Write-Output ("Plan warning (SHA256={0}): {1} Re-run -Plan to generate a SchemaVersion 3 manifest." -f $ver.PlanSha256, $ver.PlanError)
+            if ($isZh) { Write-Output ("清单警告 (SHA256={0}): {1} 请重新运行 -Plan 生成 SchemaVersion 3 清单。" -f $ver.PlanSha256, $ver.PlanError) }
+            else { Write-Output ("Plan warning (SHA256={0}): {1} Re-run -Plan to generate a SchemaVersion 3 manifest." -f $ver.PlanSha256, $ver.PlanError) }
         } elseif ($ver.PlanChecks.Count -gt 0) {
-            Write-Output "Plan check (PlanId=$($ver.PlanId); SHA256=$($ver.PlanSha256)):"
+            if ($isZh) { Write-Output "清单状态核验 (PlanId=$($ver.PlanId); SHA256=$($ver.PlanSha256)):" }
+            else { Write-Output "Plan check (PlanId=$($ver.PlanId); SHA256=$($ver.PlanSha256)):" }
             foreach ($chk in $ver.PlanChecks) {
                 Write-Output ("{0}: {1} [{2}] state={3} present={4}" -f $chk.Policy, $chk.Id, $chk.Decision, $chk.PresenceState, $chk.Present)
             }
         }
         if ($ver.LedgerError) {
-            Write-Output ("Ledger error: {0}" -f $ver.LedgerError)
+            if ($isZh) { Write-Output ("执行账本警告: {0}" -f $ver.LedgerError) }
+            else { Write-Output ("Ledger error: {0}" -f $ver.LedgerError) }
         } elseif ($ver.LedgerEntries.Count -gt 0) {
-            Write-Output "Execution ledger entries: $($ver.LedgerEntries.Count)"
+            if ($isZh) { Write-Output "执行账本记录数: $($ver.LedgerEntries.Count)" }
+            else { Write-Output "Execution ledger entries: $($ver.LedgerEntries.Count)" }
             foreach ($le in $ver.LedgerEntries) {
                 Write-Output ("Ledger: PlanId={0} Policy={1} Outcome={2} Started={3}" -f $le.PlanId, $le.Policy, $le.Outcome, $le.StartedUtc)
             }
@@ -2638,7 +2829,10 @@ if ($MyInvocation.InvocationName -ne '.') {
         return
     }
     if ($Apply) {
-        if (-not $Policy -or -not $ApprovedManifestSha256) { throw '-Apply requires -Policy and -ApprovedManifestSha256.' }
+        if (-not $Policy -or -not $ApprovedManifestSha256) {
+            if ($isZh) { throw '-Apply 需要同时提供 -Policy 与 -ApprovedManifestSha256。' }
+            throw '-Apply requires -Policy and -ApprovedManifestSha256.'
+        }
         $authPreview = Read-AuthorizedPlanDocument -PlanPath $script:PlanPath -ApprovedHash $ApprovedManifestSha256
         $previewTargets = @($authPreview.Records | Where-Object { $_.Policy -eq $Policy -and $_.Decision -eq 'Ready' })
         if ($OutputFormat -ne 'Json') {
@@ -2652,10 +2846,12 @@ if ($MyInvocation.InvocationName -ne '.') {
             return
         }
         if ($applyResult.Outcome -eq 'PreviewOnly') {
-            Write-Output 'Preview only; no deletion performed.'
+            if ($isZh) { Write-Output '仅预览（WhatIf），未执行任何实际删除。' }
+            else { Write-Output 'Preview only; no deletion performed.' }
             return
         }
         $applyResult.Results | Format-Table Id, Policy, Status, ItemsRemoved, ItemsFailed, PartialRemoval, PresenceState, RemainingExists, VerifiedAbsent -AutoSize | Out-String -Width 260 | Write-Output
-        Write-Output "Apply outcome: $($applyResult.Outcome). Run -Verify independently; do not infer remote account changes."
+        if ($isZh) { Write-Output "执行结果: $($applyResult.Outcome)。请独立运行 -Verify 核验残余；本地清理不影响远端服务器账号状态。" }
+        else { Write-Output "Apply outcome: $($applyResult.Outcome). Run -Verify independently; do not infer remote account changes." }
     }
 }

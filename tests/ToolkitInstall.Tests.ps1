@@ -56,7 +56,9 @@ function Copy-ToolkitSourceSnapshot {
     $files = @(
         'ClaudeCleanup.ps1',
         'ClaudeCleanupLauncher.cmd',
+        'ClaudeCleanupGUI.cmd',
         'scripts\ClaudeCleanupLauncher.ps1',
+        'scripts\ClaudeCleanupGUI.ps1',
         'scripts\Install-ClaudeCleanup.ps1',
         'scripts\Update-ClaudeCleanup.ps1',
         'scripts\Uninstall-ClaudeCleanup.ps1',
@@ -290,7 +292,7 @@ try {
 
     # 7. docs/gui-evaluation.md relative links and privacy check
     $docText = [System.IO.File]::ReadAllText($guiDoc, [System.Text.Encoding]::UTF8)
-    Assert-True -Condition (($docText -match 'Planned') -and ($docText -match 'ClaudeCleanup\.ps1') -and ($docText -notmatch 'C:\\Users\\')) -Name 'docs/gui-evaluation.md marks GUI as Planned, references ClaudeCleanup.ps1, and has zero local user paths'
+    Assert-True -Condition (($docText -match 'Implemented in Stage H') -and ($docText -match 'ClaudeCleanup\.ps1') -and ($docText -match 'ClaudeCleanupGUI\.ps1') -and ($docText -notmatch 'C:\\Users\\')) -Name 'docs/gui-evaluation.md documents Stage H GUI implementation, references ClaudeCleanup.ps1 and ClaudeCleanupGUI.ps1, and has zero local user paths'
 
     $linkMatches = [regex]::Matches($docText, '\[[^\]]+\]\(([^)]+)\)')
     $brokenLinks = New-Object 'System.Collections.Generic.List[string]'

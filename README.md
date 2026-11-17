@@ -2,38 +2,36 @@
 
 # Windows Claude Cleanup Toolkit
 
-A native Windows PowerShell utility for **read-only auditing**, **cryptographically bound planning**, and **user-authorized local cleanup** of Claude Code and Claude Desktop artifacts.
+A non-destructive Windows PowerShell & native Desktop GUI utility specifically designed to scan and safely clean residual Claude account/device metadata, auth tokens, session caches, extensions, and leftover registrations left behind after a Claude account ban — **strictly without altering or harming the Windows OS itself**.
 
 ---
 
 ## 1. Project Overview
 
-Windows Claude Cleanup inspects known local installations, configurations, caches, logs, VS Code extensions, MSIX packages, and browser Native Messaging registrations associated with Claude Code and Claude Desktop on Windows. It separates read-only discovery (`-Audit`), manifest generation (`-Plan`), previewable/confirmed execution (`-Apply`), and independent post-action checking (`-Verify`), without modifying device IDs, proxies, telemetry, browser profiles, or WSL distributions.
+Windows Claude Cleanup inspects known local installations, configurations, caches, logs, VS Code/Cursor extensions, MSIX packages, environment variable names, Credential Manager target counts, and browser Native Messaging registrations left behind by Claude Code and Claude Desktop on Windows. It separates read-only discovery (`-Audit`), manifest generation (`-Plan`), previewable/confirmed execution (`-Apply`), and independent post-action checking (`-Verify`), **without altering Windows OS system files, unrelated apps, browser profiles, OS hardware/device IDs, or WSL distributions**.
 
-All operations execute through a single tested PowerShell engine ([ClaudeCleanup.ps1](ClaudeCleanup.ps1)). The toolkit can be operated via CLI, through the text-mode Windows menu launcher ([ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)), or via the cross-agent Skill ([skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)).
+All operations execute through a single tested PowerShell engine ([ClaudeCleanup.ps1](ClaudeCleanup.ps1)) supporting seamless **Simplified Chinese / English (`-Language Auto|zh-CN|en-US`)** switching. You can use it via the native **Windows Desktop GUI** ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) / [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)), the text-mode menu launcher ([ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)), the PowerShell CLI, or the cross-agent Skill ([skills/claude-cleanup/SKILL.md](skills/claude-cleanup/SKILL.md)).
 
 ## 2. Current Release Status
 
-- **Stage**: Release Candidate (Stages A–F implemented and verified across Windows PowerShell 5.1 and PowerShell 7+).
-- **Real Cleanup Status**: No real Claude data cleanup has been authorized or executed during development. All deletions require explicit user confirmation of the manifest SHA-256 hash and policy.
+- **Stage**: Release Candidate (Stages A–H implemented and verified across Windows PowerShell 5.1 and PowerShell 7+).
+- **Real Cleanup Status**: No real Claude data cleanup has been authorized or executed during development. Default mode is strictly read-only Audit; all deletions require explicit user confirmation of the manifest SHA-256 hash and policy.
 - **Repository Visibility**: Private development repository (`main` branch).
 
 ## 3. Features and Limitations
 
 ### Implemented Capabilities
-- **Read-Only System Audit (`-Audit`)**: Discovers native and npm Claude Code CLI installations (npm global prefix resolution via `npm`, `.npmrc`, `NPM_CONFIG_PREFIX`, `%APPDATA%\npm`), Claude Desktop, VS Code / Cursor / Windsurf Claude extensions, MSIX packages, Start Menu / Desktop / Startup `.lnk` shortcuts, Windows services/scheduled tasks, environment variable **names only** (`Scope` + `Name`, never secret values), `PATH` entries, Credential Manager target counts (no secret values read), AppData role classification, path ACL/owner/reparse diagnostics, and read-only WSL reporting.
-- **Structured JSON Output (`-OutputFormat Json`)**: Supports machine-readable JSON output (`SchemaVersion = 3`) alongside text reports across `-Audit`, `-Plan`, `-Verify`, and `-Apply` for automation and agent skill integration.
-- **Deterministic Cleanup Plan (`-Plan`)**: Generates `CLEANUP-PLAN.md` with a unique GUID `PlanId`, SHA-256 integrity hash, per-entry `Ready` / `ReviewOnly` / `Blocked` decisions, NTFS `VolumeSerialNumber` / `FileIndex`, and subtree `MaxLastWriteUtcTicks`.
-- **Win32 Handle-Bound Deletion**: Deletes filesystem nodes via `SetFileInformationByHandle` on validated handles opened with `FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS`, enforcing current user `OwnerSid` on every node, with strict reparse-point rejection and zero `Remove-Item` fallback.
-- **Controlled Package Uninstallers (`FullRemoval`)**: Strictly scoped uninstallation handlers for npm (`@anthropic-ai/claude-code`), VS Code (`code --uninstall-extension anthropic.claude-code`), and MSIX (`Remove-AppxPackage Claude_pzs8sxrjxfjjc`), each with fail-closed post-verification.
-- **Cross-Agent Skill (`skills/claude-cleanup/`)**: Canonical multi-agent skill package ([SKILL.md](skills/claude-cleanup/SKILL.md)) compatible with Codex CLI, Antigravity CLI, Gemini CLI, and Claude Code, enforcing read-only `-Audit` default, explicit plan SHA-256 authorization gate, zero duplicated deletion code, and optional dev-only REA stance.
-- **Safe Menu Launcher**: Command batch wrapper ([ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd)) and interactive text menu ([scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1)) supporting Audit, Plan, View Reports, Verify, and Help without `-ExecutionPolicy Bypass`, without auto-elevation, and without automatic `-Apply`.
-- **User-Scoped Lifecycle Management**: Scripts for installation ([scripts/Install-ClaudeCleanup.ps1](scripts/Install-ClaudeCleanup.ps1)), updating ([scripts/Update-ClaudeCleanup.ps1](scripts/Update-ClaudeCleanup.ps1)), and uninstallation ([scripts/Uninstall-ClaudeCleanup.ps1](scripts/Uninstall-ClaudeCleanup.ps1)) cleanly separating toolkit files, optional Agent Skills, and Claude application presence.
-- **Release Packaging & CI Matrix**: Release packaging script ([scripts/New-ReleasePackage.ps1](scripts/New-ReleasePackage.ps1)) and GitHub Actions workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml)) testing Windows PowerShell 5.1 and PowerShell 7 on `windows-latest`.
-- **Detailed Documentation**: Comprehensive guides covering [CLI Reference](docs/CLI-Reference.md), [Launcher & Install](docs/Launcher-and-Install.md), [Agent Skill Guide](docs/Agent-Skill-Guide.md), [Uninstallation Guide](docs/Uninstallation-Guide.md), [Troubleshooting & Compatibility](docs/Troubleshooting-and-Compatibility.md), sample reports in [docs/examples/](docs/examples/), [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), [LICENSE](LICENSE), and [NOTICE](NOTICE).
+- **Post-Ban Residual Scanning & Safe Cleanup Scope**: Targets allowlisted Claude Code CLI configs/IDs (`.claude`, `.claude.json`, `.local\bin\claude.exe`, npm `@anthropic-ai/claude-code`), Claude Desktop local storage/MSIX (`%APPDATA%\Claude`, `%LOCALAPPDATA%\Claude`, `Claude_pzs8sxrjxfjjc`), VS Code / Cursor / Windsurf extensions (`anthropic.claude-code`) and browser Native Messaging HKCU keys, Start Menu / Desktop / Startup `.lnk` shortcuts, Windows services/scheduled tasks, environment variable **names only** (`Scope` + `Name`, never secret values), `PATH` entries, Credential Manager target counts (no secret values read or deleted), AppData role classification, path ACL/owner/reparse diagnostics, and read-only WSL reporting.
+- **Seamless Bilingual Runtime (`-Language Auto|zh-CN|en-US`)**: Automatically selects `zh-CN` on Chinese Windows locales (`zh*`) or switches manually between Simplified Chinese and English with UTF-8 console encoding and localized Markdown reports (`AUDIT.md`, `CLEANUP-PLAN.md`, `VERIFICATION.md`) while keeping JSON schema keys invariant.
+- **Native Windows Desktop GUI ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd))**: Zero-dependency WinForms desktop app ([scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1)) with live **中 / EN** switching, OS-safety badge, categorized target-scope checklist, step-by-step buttons (`Scan`, `Preview Plan`, disabled-until-ready `Clean Selected` with mandatory `-WhatIf` preview and explicit path-listing confirmation dialog, `Verify`), and report viewer/quick-open buttons — strictly wrapping [ClaudeCleanup.ps1](ClaudeCleanup.ps1).
+- **Structured JSON Output (`-OutputFormat Json`)**: Supports machine-readable JSON output (`SchemaVersion = 3`) alongside text reports across `-Audit`, `-Plan`, `-Verify`, and `-Apply`.
+- **Deterministic Cleanup Plan (`-Plan`) & Win32 Handle-Bound Deletion**: Generates `CLEANUP-PLAN.md` with GUID `PlanId` and SHA-256 binding; deletes filesystem nodes via `SetFileInformationByHandle` (`FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS`), enforcing current user `OwnerSid` on every node, rejecting reparse points, and zero `Remove-Item` fallback.
+- **Controlled Package Uninstallers (`FullRemoval`)**: Strictly scoped handlers for npm (`@anthropic-ai/claude-code`), VS Code (`code --uninstall-extension anthropic.claude-code`), and MSIX (`Remove-AppxPackage Claude_pzs8sxrjxfjjc`), each with fail-closed post-verification.
+- **Cross-Agent Skill (`skills/claude-cleanup/`)**: Canonical multi-agent skill package ([SKILL.md](skills/claude-cleanup/SKILL.md)) compatible with Codex CLI, Antigravity CLI, Gemini CLI, and Claude Code, enforcing read-only `-Audit` default and SHA-256 authorization gates.
+- **Safe Menu Launcher & User-Scoped Lifecycle**: [ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd) and [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1) (supporting bilingual switching and `[6] Launch GUI`), plus [scripts/Install-ClaudeCleanup.ps1](scripts/Install-ClaudeCleanup.ps1), [scripts/Update-ClaudeCleanup.ps1](scripts/Update-ClaudeCleanup.ps1), and [scripts/Uninstall-ClaudeCleanup.ps1](scripts/Uninstall-ClaudeCleanup.ps1).
+- **Release Packaging, CI Matrix & Documentation**: Release packaging ([scripts/New-ReleasePackage.ps1](scripts/New-ReleasePackage.ps1)), GitHub Actions workflow ([.github/workflows/ci.yml](.github/workflows/ci.yml)), guides in [docs/](docs/), [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), [LICENSE](LICENSE), and [NOTICE](NOTICE).
 
 ### Planned (Not Yet Implemented)
-- **GUI Thin Wrapper**: Evaluated in [docs/gui-evaluation.md](docs/gui-evaluation.md); deferred to future milestone Stage E+.
 - **Real-World Live Execution (Stage G)**: Separately authorized real-data cleanup on live host systems.
 
 ## 4. Supported Windows Versions
@@ -69,21 +67,28 @@ powershell.exe -NoProfile -File .\scripts\Install-ClaudeCleanup.ps1 -InstallSkil
 
 ## 7. Quick Start
 
-### Using the Safe Menu Launcher (Recommended for Nontechnical Users)
+### Using the Native Windows Desktop GUI (Recommended)
+Double-click [ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) or run from PowerShell:
+```cmd
+.\ClaudeCleanupGUI.cmd
+```
+Features live **中 / EN** language switching, categorized target-scope checkboxes, read-only default **Scan**, **Preview Plan**, confirmation-gated **Clean Selected**, and **Verify**.
+
+### Using the Safe Console Menu Launcher
 Run from Command Prompt or PowerShell:
 ```cmd
 .\ClaudeCleanupLauncher.cmd
 ```
-The menu allows running read-only audits, generating cleanup plans, viewing local reports, and verifying system state without command-line flags.
+The menu supports switching languages (`[L]`), launching the native Desktop GUI (`[6]`), running read-only audits, generating cleanup plans, viewing local reports, and verifying system state without command-line flags.
 
 ### Using the PowerShell CLI Directly
-Run from the repository root:
+Run from the repository root (auto-detects Chinese Windows locales or accepts `-Language zh-CN|en-US`):
 ```powershell
-.\ClaudeCleanup.ps1 -Help
-.\ClaudeCleanup.ps1 -Audit
+.\ClaudeCleanup.ps1 -Help -Language Auto
+.\ClaudeCleanup.ps1 -Audit -Language zh-CN
 .\ClaudeCleanup.ps1 -Plan
 ```
-Review `AUDIT.md` (if saved) and the generated `CLEANUP-PLAN.md` plus its SHA-256 hash before previewing any deletion.
+Review `AUDIT.md` (optional `-SaveAuditReport`) and the generated `CLEANUP-PLAN.md` plus its SHA-256 hash before previewing any deletion.
 
 ## 8. CLI Command Reference
 
@@ -91,13 +96,13 @@ See [CLI Command Reference](docs/CLI-Reference.md) for full syntax and JSON sche
 
 | Command | Purpose | Writes to Disk |
 | :--- | :--- | :--- |
-| `.\ClaudeCleanup.ps1 -Help` | Show usage and safety boundaries | None |
-| `.\ClaudeCleanup.ps1 -Audit [-OutputFormat Text\|Json]` | Read-only environment, ACL/AppData diagnostics, and candidate inventory | None |
-| `.\ClaudeCleanup.ps1 -Plan [-OutputFormat Text\|Json]` | Generate `CLEANUP-PLAN.md` (`SchemaVersion = 3`) | `CLEANUP-PLAN.md` only |
+| `.\ClaudeCleanup.ps1 -Help [-Language Auto\|zh-CN\|en-US]` | Show usage and safety boundaries | None |
+| `.\ClaudeCleanup.ps1 -Audit [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json] [-SaveAuditReport]` | Read-only environment, ACL/AppData diagnostics, and candidate inventory | None (unless `-SaveAuditReport` writes `AUDIT.md`) |
+| `.\ClaudeCleanup.ps1 -Plan [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json]` | Generate `CLEANUP-PLAN.md` (`SchemaVersion = 3`) | `CLEANUP-PLAN.md` only |
 | `.\ClaudeCleanup.ps1 -Plan -WhatIf` | Preview plan generation without writing | None |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex> [-OutputFormat Text\|Json] -WhatIf` | Dry-run preview of authorized targets | None |
-| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex> [-OutputFormat Text\|Json]` | Execute approved `Ready` targets after confirmation | Deletes approved targets + updates `VERIFICATION.md` ledger |
-| `.\ClaudeCleanup.ps1 -Verify [-OutputFormat Text\|Json]` | Inspect current state vs. `CLEANUP-PLAN.md` and `VERIFICATION.md` | None |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex> [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json] -WhatIf` | Dry-run preview of authorized targets | None |
+| `.\ClaudeCleanup.ps1 -Apply -Policy <Policy> -ApprovedManifestSha256 <64-hex> [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json]` | Execute approved `Ready` targets after confirmation | Deletes approved targets + updates `VERIFICATION.md` ledger |
+| `.\ClaudeCleanup.ps1 -Verify [-Language Auto\|zh-CN\|en-US] [-OutputFormat Text\|Json]` | Inspect current state vs. `CLEANUP-PLAN.md` and `VERIFICATION.md` | None |
 
 ## 9. Audit / Plan / Apply / Verify Workflow
 
@@ -166,6 +171,10 @@ pwsh.exe -NoProfile -File .\tests\ToolkitInstall.Tests.ps1
 # CI workflow, packaging, and release tests
 powershell.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
 pwsh.exe -NoProfile -File .\tests\ToolkitCiChecks.Tests.ps1
+
+# Bilingual locale switching & native Desktop GUI validation
+powershell.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
+pwsh.exe -NoProfile -File .\tests\BilingualAndGui.Tests.ps1
 ```
 
 - **Permission & Authorization Note**: Creating Windows symbolic links requires Administrator or Developer Mode privileges (`SeCreateSymbolicLinkPrivilege`); unprivileged sessions explicitly report those symlink creation cases as `SKIP` (and restricted app-container sandboxes may also block `FSCTL_SET_REPARSE_POINT` junction creation). Live HKCU write/delete, cross-SID mixed-ownership disk tests, and live `npm` / `code` / `Remove-AppxPackage` uninstall calls remain explicitly reported as `NotExecuted` during sandboxed testing.
@@ -189,10 +198,11 @@ The canonical `claude-cleanup` skill package is located at [skills/claude-cleanu
 
 Supported agent CLIs include Codex CLI (`~/.codex/skills/` or shared `~/.agents/skills/`), Antigravity CLI (`~/.gemini/config/skills/`), Gemini CLI (`~/.gemini/skills/`), and Claude Code (`~/.claude/skills/`). The skill strictly delegates to `ClaudeCleanup.ps1` with zero duplicated deletion code, defaults to read-only `-Audit`, and enforces human authorization before `-Apply`.
 
-## 17. Windows Launcher and GUI Evaluation
+## 17. Native Windows Desktop GUI and Architecture Notes
 
-- **Console Menu Launcher**: [ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd) and [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1) provide an interactive text menu for nontechnical users (see [Launcher & Install Guide](docs/Launcher-and-Install.md)).
-- **GUI Thin Wrapper Evaluation**: Feasibility of an optional future WPF/XAML thin wrapper is documented in [docs/gui-evaluation.md](docs/gui-evaluation.md). Implementation is deferred to future milestone Stage E+ to keep dependencies minimal.
+- **Native Desktop GUI ([ClaudeCleanupGUI.cmd](ClaudeCleanupGUI.cmd) + [scripts/ClaudeCleanupGUI.ps1](scripts/ClaudeCleanupGUI.ps1))**: Zero-dependency WinForms desktop utility with live **中 / EN** toggle, target scope checklist, read-only default scanning, disabled-until-ready cleanup button, and explicit SHA-256 + path confirmation dialog before invoking [ClaudeCleanup.ps1](ClaudeCleanup.ps1).
+- **Console Menu Launcher ([ClaudeCleanupLauncher.cmd](ClaudeCleanupLauncher.cmd) + [scripts/ClaudeCleanupLauncher.ps1](scripts/ClaudeCleanupLauncher.ps1))**: Provides interactive bilingual text menus plus direct `[6] Launch GUI` integration (see [Launcher & Install Guide](docs/Launcher-and-Install.md)).
+- **GUI Design & Security Record**: Detailed architecture and security boundaries are recorded in [docs/gui-evaluation.md](docs/gui-evaluation.md).
 
 ## 18. How to Uninstall Claude
 

@@ -3,31 +3,31 @@
 **Project:** Windows Claude Cleanup Toolkit  
 **Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
 **Language Navigation:** [English](../README.md) | [简体中文](../README_zh-CN.md)  
-**Document Status:** Implemented for Core CLI (v0.3.0)
+**Document Status:** Implemented for Core CLI & Stage H Bilingual Support
 
 ---
 
 ## 1. Syntax Overview / 语法概览
 
-The primary CLI entry point is `ClaudeCleanup.ps1`. It accepts standard PowerShell switch parameters, validation attributes, and `ShouldProcess` controls:
+The primary CLI entry point is `ClaudeCleanup.ps1`. It is designed as a non-destructive Windows utility to scan and safely clean residual Claude account/device metadata, auth tokens, session caches, and leftover registrations after a Claude account ban — strictly without altering Windows OS itself:
 
 ```powershell
 # Help / 帮助
-.\ClaudeCleanup.ps1 -Help
+.\ClaudeCleanup.ps1 -Help [-Language Auto|zh-CN|en-US]
 
 # Audit / 只读审计
-.\ClaudeCleanup.ps1 -Audit [-OutputFormat Text|Json]
+.\ClaudeCleanup.ps1 -Audit [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json] [-SaveAuditReport]
 
 # Plan / 生成清理清单
-.\ClaudeCleanup.ps1 -Plan [-OutputFormat Text|Json]
+.\ClaudeCleanup.ps1 -Plan [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
 .\ClaudeCleanup.ps1 -Plan -WhatIf
 
 # Apply / 执行清理 (需要预先批准的清单哈希与策略)
-.\ClaudeCleanup.ps1 -Apply -Policy <AccountData|FullRemoval> -ApprovedManifestSha256 <64-Hex-Hash> [-OutputFormat Text|Json] -WhatIf
-.\ClaudeCleanup.ps1 -Apply -Policy <AccountData|FullRemoval> -ApprovedManifestSha256 <64-Hex-Hash> [-OutputFormat Text|Json]
+.\ClaudeCleanup.ps1 -Apply -Policy <AccountData|FullRemoval> -ApprovedManifestSha256 <64-Hex-Hash> [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json] -WhatIf
+.\ClaudeCleanup.ps1 -Apply -Policy <AccountData|FullRemoval> -ApprovedManifestSha256 <64-Hex-Hash> [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
 
 # Verify / 独立验证
-.\ClaudeCleanup.ps1 -Verify [-OutputFormat Text|Json]
+.\ClaudeCleanup.ps1 -Verify [-Language Auto|zh-CN|en-US] [-OutputFormat Text|Json]
 ```
 
 ---
@@ -51,7 +51,9 @@ Exactly one of the following primary mode switches must be specified per invocat
 | :--- | :--- | :--- | :--- |
 | `-Policy` | `[string]` | `AccountData`, `FullRemoval` | Required when `-Apply` is invoked. Specifies the boundary of items eligible for removal. |
 | `-ApprovedManifestSha256` | `[string]` | 64-hex regex (`^[A-Fa-f0-9]{64}$`) | Required when `-Apply` is invoked. Must match the exact SHA-256 hash computed from `CLEANUP-PLAN.md`. Cannot be reused across executions. |
-| `-OutputFormat` | `[string]` | `Text`, `Json` (Default: `Text`) | Selects the emission format. `Text` provides formatted console tables and summaries; `Json` outputs structured JSON objects for automated pipelines and Agent Skills. |
+| `-OutputFormat` | `[string]` | `Text`, `Json` (Default: `Text`) | Selects the emission format. `Text` provides formatted console tables and summaries; `Json` outputs structured JSON objects with invariant schema keys regardless of `-Language`. |
+| `-Language` | `[string]` | `Auto`, `zh-CN`, `en-US` (Default: `Auto`) | Selects runtime display and Markdown report language (`AUDIT.md`, `CLEANUP-PLAN.md`, `VERIFICATION.md`). `Auto` selects `zh-CN` when Windows UI culture matches `zh*`. Configures UTF-8 console encoding cleanly. |
+| `-SaveAuditReport` | `[switch]` | Optional with `-Audit` | Explicitly writes localized `AUDIT.md` alongside running read-only audit (default `-Audit` writes nothing to disk). |
 | `-WhatIf` | `[switch]` | PowerShell Built-in | Supported on `-Plan` and `-Apply`. Simulates execution without modifying disk files or consuming the manifest SHA-256 authorization. |
 | `-Confirm` | `[switch]` | PowerShell Built-in | Overrides or confirms the high-impact interactive confirmation prompt (`-Confirm:$false` for scripted runs where authorization is explicitly established). |
 
