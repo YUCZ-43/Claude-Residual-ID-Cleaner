@@ -1,10 +1,10 @@
 # Security Policy
 
-**Project:** Windows Claude Cleanup Toolkit  
-**Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
-**Language Navigation:** [English](README.md) | [简体中文](README_zh-CN.md)
+**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
+**Repository:** `YUCZ-43/claude-cleanup`  
+**Language Navigation:** [简体中文](README.md) | [English](README.en.md)
 
-The Windows Claude Cleanup Toolkit is engineered with a strict **fail-closed**, **defense-in-depth** security architecture designed to prevent accidental data loss, path traversal, link following, privilege abuse, or replay attacks.
+The **claude-cleanup** toolkit is engineered with a strict **fail-closed**, **defense-in-depth** security architecture designed to prevent accidental data loss, path traversal, link following, privilege abuse, or replay attacks.
 
 ---
 

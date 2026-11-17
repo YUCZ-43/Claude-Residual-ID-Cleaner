@@ -2,7 +2,7 @@
 param(
     [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputDirectory = '',
-    [string]$PackageName = 'Windows-Claude-Cleanup',
+    [string]$PackageName = 'claude-cleanup',
     [string]$Version = '0.1.0'
 )
 

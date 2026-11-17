@@ -4,14 +4,14 @@ This guide explains how to manually install, verify, and cleanly uninstall the c
 
 > **Important Separation of Concerns**
 > - Installing or uninstalling this skill only adds or removes agent skill Markdown instructions (`SKILL.md` and `references/`).
-> - It does **not** install or uninstall the `Windows-Claude-Cleanup` toolkit itself (`ClaudeCleanup.ps1`), and it does **not** remove Claude Code or Claude Desktop.
+> - It does **not** install or uninstall the `claude-cleanup` toolkit itself (`ClaudeCleanup.ps1`), and it does **not** remove Claude Code or Claude Desktop.
 > - See [SKILL.md](../SKILL.md) and [permissions-and-risks.md](permissions-and-risks.md) for runtime safety rules.
 
 ---
 
 ## 1. Prerequisites
 
-1. Clone or download `Windows-Claude-Cleanup` to a local folder (for example, `C:\Users\<USERNAME>\Tools\Windows-Claude-Cleanup`).
+1. Clone or download `claude-cleanup` to a local folder (for example, `C:\Users\<USERNAME>\Tools\claude-cleanup`).
 2. Confirm `ClaudeCleanup.ps1` and `skills\claude-cleanup\SKILL.md` are present in that folder.
 3. Keep `ClaudeCleanup.ps1` in its toolkit directory; do **not** copy `ClaudeCleanup.ps1` into `~/.codex`, `~/.agents`, `~/.gemini`, or `~/.claude` (those directories are protected against cleanup targeting).
 4. Never use `-ExecutionPolicy Bypass` when running PowerShell commands.
@@ -29,13 +29,13 @@ Choose either **Project-Scoped** (when working inside a workspace) or **User-Sco
 | **Gemini CLI** | `.gemini\skills\claude-cleanup\` (or `.agents\skills\claude-cleanup\`) | `%USERPROFILE%\.gemini\skills\claude-cleanup\` (`Gemini`) |
 | **Claude Code** | `.claude\skills\claude-cleanup\` | `%USERPROFILE%\.claude\skills\claude-cleanup\` (`Claude`) |
 
-> **Note on Project-Scoped Use Without Global Install**: If you run an agent CLI directly inside the `Windows-Claude-Cleanup` repository (or copy `skills\claude-cleanup\` into a project's `.agents\skills\` folder), the skill stays local to that project without modifying your user profile directories.
+> **Note on Project-Scoped Use Without Global Install**: If you run an agent CLI directly inside the `claude-cleanup` repository (or copy `skills\claude-cleanup\` into a project's `.agents\skills\` folder), the skill stays local to that project without modifying your user profile directories.
 
 ---
 
 ## 3. Manual User-Scoped Installation
 
-Run these commands from the root of your local `Windows-Claude-Cleanup` folder after inspecting the files. Choose **only** the target CLI directory you use.
+Run these commands from the root of your local `claude-cleanup` folder after inspecting the files. Choose **only** the target CLI directory you use.
 
 ### Option A: Shared `.agents` User Scope (Codex CLI & Shared Agent Discovery)
 
@@ -71,7 +71,7 @@ Copy-Item -LiteralPath '.\skills\claude-cleanup' -Destination $target -Recurse -
 
 ### How the Skill Finds `ClaudeCleanup.ps1` After User-Scoped Install
 
-When invoked from another working directory, the agent will need the full path to your local `ClaudeCleanup.ps1` (for example, `C:\Users\<USERNAME>\Tools\Windows-Claude-Cleanup\ClaudeCleanup.ps1`). Provide that path in your prompt or run the CLI from your `Windows-Claude-Cleanup` folder.
+When invoked from another working directory, the agent will need the full path to your local `ClaudeCleanup.ps1` (for example, `C:\Users\<USERNAME>\Tools\claude-cleanup\ClaudeCleanup.ps1`). Provide that path in your prompt or run the CLI from your `claude-cleanup` folder.
 
 ---
 
@@ -93,7 +93,7 @@ When invoked from another working directory, the agent will need the full path t
 
 ## 5. Clean User-Scoped Uninstallation (Skill Only)
 
-To remove **only** the installed `claude-cleanup` skill without affecting other skills, the `Windows-Claude-Cleanup` toolkit, or Claude installations, delete only the `claude-cleanup` folder from whichever user-scoped path you chose:
+To remove **only** the installed `claude-cleanup` skill without affecting other skills, the `claude-cleanup` toolkit, or Claude installations, delete only the `claude-cleanup` folder from whichever user-scoped path you chose:
 
 ```powershell
 # Remove whichever user-scoped skill folder you installed:
@@ -111,4 +111,4 @@ foreach ($p in $paths) {
 ```
 
 - Removing the `claude-cleanup` skill folder leaves all other agent customizations intact.
-- If you also want to remove the `Windows-Claude-Cleanup` toolkit itself, delete your local `Windows-Claude-Cleanup` directory separately.
+- If you also want to remove the `claude-cleanup` toolkit itself, delete your local `claude-cleanup` directory separately.

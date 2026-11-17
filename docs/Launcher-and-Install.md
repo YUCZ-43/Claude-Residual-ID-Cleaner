@@ -1,15 +1,15 @@
-# Windows Claude Cleanup — Launcher and Installation Guide
+# claude-cleanup — Launcher and Installation Guide
 
-**Project:** Windows Claude Cleanup Toolkit  
-**Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
-**Language Navigation:** [English](../README.md) | [简体中文](../README_zh-CN.md)  
+**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
+**Repository:** `YUCZ-43/claude-cleanup`  
+**Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
 **Document Status:** Implemented (Portable Mode, Native Windows Desktop GUI, Bilingual Console Launcher, and User-Scoped Installer/Updater/Uninstaller)
 
 ---
 
 ## 1. Overview / 概述
 
-This document provides instructions for setting up and running the Windows Claude Cleanup Toolkit. The toolkit is designed with zero runtime dependencies beyond standard Windows operating system components (Windows 10/11, PowerShell 5.1 or PowerShell 7+, and .NET).
+This document provides instructions for setting up and running `claude-cleanup`. The toolkit is designed with zero runtime dependencies beyond standard Windows operating system components (Windows 10/11, PowerShell 5.1 or PowerShell 7+, and .NET).
 
 ---
 
@@ -21,11 +21,11 @@ In the current release, the toolkit is completely portable and requires no admin
 1. **Obtain the Toolkit**:
    Clone the repository or download the source code as a ZIP archive:
    ```powershell
-   git clone https://github.com/YUCZ-43/Windows-Claude-Cleanup.git
-   cd Windows-Claude-Cleanup
+   git clone https://github.com/YUCZ-43/claude-cleanup.git
+   cd claude-cleanup
    ```
    Or extract to a dedicated user folder, such as:
-   `C:\Users\<USERNAME>\Tools\Windows-Claude-Cleanup`
+   `C:\Users\<USERNAME>\Tools\claude-cleanup`
 
 2. **Inspect the Source Code**:
    Review [ClaudeCleanup.ps1](../ClaudeCleanup.ps1) and [SECURITY.md](../SECURITY.md) before execution.
@@ -101,10 +101,10 @@ To support nontechnical users without installing an AI agent, the toolkit provid
 
 ## 5. User-Scoped Installer, Updater & Uninstaller / 用户级安装、升级与卸载脚本
 
-Lifecycle management scripts deploy cleanly within the user's local AppData profile (`%LOCALAPPDATA%\Programs\Windows-Claude-Cleanup`) with SHA-256 managed manifests (`.claude-cleanup-install.json` and `.claude-cleanup-skill-install.json`), without modifying system `PATH`, Start Menu shortcuts, registry keys, or Claude applications:
+Lifecycle management scripts deploy cleanly within the user's local AppData profile (`%LOCALAPPDATA%\Programs\claude-cleanup`) with SHA-256 managed manifests (`.claude-cleanup-install.json` and `.claude-cleanup-skill-install.json`), without modifying system `PATH`, Start Menu shortcuts, registry keys, or Claude applications:
 
 ### `scripts/Install-ClaudeCleanup.ps1`
-- Installs toolkit scripts and docs into `%LOCALAPPDATA%\Programs\Windows-Claude-Cleanup` (override with `-InstallRoot`).
+- Installs toolkit scripts and docs into `%LOCALAPPDATA%\Programs\claude-cleanup` (override with `-InstallRoot`).
 - Optionally installs the canonical Agent Skill (`-InstallSkill` or `-SkillOnly` alongside `-SkillTarget Codex|Antigravity|Gemini|Claude|Agents|All`).
 - Validates reparse-point safety and protected paths atomically before writing any file.
 

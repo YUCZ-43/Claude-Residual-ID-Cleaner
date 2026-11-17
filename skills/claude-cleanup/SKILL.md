@@ -42,7 +42,7 @@ Use this skill to operate the native PowerShell backend (`ClaudeCleanup.ps1`) sa
 Before running any command, locate the repository root containing `ClaudeCleanup.ps1`:
 
 - If your current working directory is the toolkit repository, use `.\ClaudeCleanup.ps1`.
-- If the skill is installed in a user-scoped skills directory outside the repository, ask the user for their local `Windows-Claude-Cleanup` path or verify the path they provided before running anything.
+- If the skill is installed in a user-scoped skills directory outside the repository, ask the user for their local `claude-cleanup` path or verify the path they provided before running anything.
 - Do not copy `ClaudeCleanup.ps1` into agent config folders (`.codex`, `.agents`, `.gemini`, `.claude`) or create custom deletion wrappers.
 
 ---

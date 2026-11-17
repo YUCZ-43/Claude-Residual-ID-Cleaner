@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -145,8 +145,8 @@ try {
     # Legitimate files expected in release ZIP
     $legitFiles = @{
         'ClaudeCleanup.ps1'             = '# cleanup script placeholder'
-        'README.md'                     = '**English** | [Chinese](README_zh-CN.md)'
-        'README_zh-CN.md'               = '[English](README.md)'
+        'README.md'                     = '简体中文 | [English](README.en.md)'
+        'README.en.md'                  = '[简体中文](README.md) | English'
         '.gitignore'                    = 'AUDIT.md'
         '.github/workflows/ci.yml'      = 'name: CI'
         'scripts/New-ReleasePackage.ps1'= '# release helper'
@@ -213,7 +213,7 @@ try {
     $pkgResult = & $releaseScriptPath -SourceRoot $fakeRepo -OutputDirectory $customOut -Version '1.2.3-test'
     Assert-True (Test-Path -LiteralPath $pkgResult.PackagePath -PathType Leaf) 'Release ZIP created in caller -OutputDirectory'
     Assert-True (Test-Path -LiteralPath $pkgResult.Sha256SumsPath -PathType Leaf) 'SHA256SUMS.txt created in caller -OutputDirectory'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fakeRepo 'dist\Windows-Claude-Cleanup-1.2.3-test.zip'))) 'Caller -OutputDirectory does not write into SourceRoot/dist'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fakeRepo 'dist\claude-cleanup-1.2.3-test.zip'))) 'Caller -OutputDirectory does not write into SourceRoot/dist'
 
     $zipEntries = New-Object 'System.Collections.Generic.List[string]'
     $zipRead = [System.IO.Compression.ZipFile]::OpenRead($pkgResult.PackagePath)
@@ -288,7 +288,27 @@ try {
     [IO.File]::WriteAllText((Join-Path $leakRepo 'README.md'), "Leaked SID: $fakeSid")
     $leakOut = Join-Path $releaseSandbox 'leak-out'
     Assert-Throws { & $releaseScriptPath -SourceRoot $leakRepo -OutputDirectory $leakOut -Version '0.0.1-leak' } 'New-ReleasePackage.ps1 fails closed when included file contains a user SID'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $leakOut 'Windows-Claude-Cleanup-0.0.1-leak.zip'))) 'Failed privacy gate leaves no release ZIP behind'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $leakOut 'claude-cleanup-0.0.1-leak.zip'))) 'Failed privacy gate leaves no release ZIP behind'
+
+    # 6. Repository Stage I bilingual README swap and zero-emoji hygiene checks
+    $utf8Strict = New-Object System.Text.UTF8Encoding($false, $true)
+    $rootReadmePath = Join-Path $repoRoot 'README.md'
+    $enReadmePath = Join-Path $repoRoot 'README.en.md'
+    $legacyZhReadmePath = Join-Path $repoRoot 'README_zh-CN.md'
+    $rootReadmeText = $utf8Strict.GetString([IO.File]::ReadAllBytes($rootReadmePath))
+    $enReadmeText = $utf8Strict.GetString([IO.File]::ReadAllBytes($enReadmePath))
+    $emojiRegex = '[\u2600-\u27BF]|[\uD800-\uDBFF][\uDC00-\uDFFF]'
+    Assert-True (
+        (Test-Path -LiteralPath $rootReadmePath -PathType Leaf) -and
+        (Test-Path -LiteralPath $enReadmePath -PathType Leaf) -and
+        (-not (Test-Path -LiteralPath $legacyZhReadmePath)) -and
+        ($rootReadmeText.StartsWith('简体中文 | [English](README.en.md)')) -and
+        ($enReadmeText.StartsWith('[简体中文](README.md) | English')) -and
+        ($rootReadmeText -notmatch $emojiRegex) -and
+        ($enReadmeText -notmatch $emojiRegex) -and
+        (-not $rootReadmeText.Contains([char]0xFFFD)) -and
+        (-not $enReadmeText.Contains([char]0xFFFD))
+    ) 'Primary README.md is Simplified Chinese, README.en.md is English, legacy README_zh-CN.md is removed, and zero emojis exist'
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; 0 failed"
 } finally {

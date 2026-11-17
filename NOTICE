@@ -1,8 +1,8 @@
-Windows Claude Cleanup Toolkit
-Copyright (c) 2026 Windows-Claude-Cleanup Contributors
+claude-cleanup (Claude Residual ID Cleaner)
+Copyright (c) 2026 claude-cleanup Contributors
 
-This product includes software developed as part of the Windows Claude Cleanup
-Toolkit project (https://github.com/YUCZ-43/Windows-Claude-Cleanup).
+This product includes software developed as part of the claude-cleanup
+project (https://github.com/YUCZ-43/claude-cleanup).
 
 ===============================================================================
 1. Clean-Room Windows Implementation & Zero Third-Party Dependencies

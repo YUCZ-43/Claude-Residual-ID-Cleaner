@@ -1,8 +1,8 @@
-# Windows Claude Cleanup — CLI Command Reference
+# claude-cleanup — CLI Command Reference
 
-**Project:** Windows Claude Cleanup Toolkit  
-**Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
-**Language Navigation:** [English](../README.md) | [简体中文](../README_zh-CN.md)  
+**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
+**Repository:** `YUCZ-43/claude-cleanup`  
+**Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
 **Document Status:** Implemented for Core CLI & Stage H Bilingual Support
 
 ---

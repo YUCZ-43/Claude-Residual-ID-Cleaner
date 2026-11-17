@@ -63,7 +63,7 @@ function Copy-ToolkitSourceSnapshot {
         'scripts\Update-ClaudeCleanup.ps1',
         'scripts\Uninstall-ClaudeCleanup.ps1',
         'README.md',
-        'README_zh-CN.md'
+        'README.en.md'
     )
     if (-not $OmitGuiDoc) {
         $files += 'docs\gui-evaluation.md'

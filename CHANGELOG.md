@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Windows Claude Cleanup Toolkit project will be documented in this file.
+All notable changes to the **claude-cleanup** (`Claude Residual ID Cleaner`) project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+
+### Changed
+- **Stage I — Repository Rebrand to `claude-cleanup` & Primary Simplified Chinese `README.md`**:
+  - Renamed repository/project metadata, GitHub repository (`YUCZ-43/claude-cleanup`), docs, installer/packager defaults (`%LOCALAPPDATA%\Programs\claude-cleanup`, `claude-cleanup-<Version>.zip`), and About text to `claude-cleanup`.
+  - Promoted Simplified Chinese documentation to primary [README.md](README.md) and moved full English documentation to [README.en.md](README.en.md), retiring legacy `README_zh-CN.md` with clean language switching bars and zero emojis.
 
 ### Added
 - **Stage H (Desktop `.exe` Upgrade) — Standalone Zero-Console Windows WPF Desktop Application**:
@@ -51,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Open-Handle Registry Deletion**: Hardened registry deletion to inspect ancestor keys for `REG_LINK` symbolic links and delete directly on the open validated handle via `ntdll!NtDeleteKey`.
 - **Subtree Owner SID Enforcement**: Enforced current-user SID matching across every node in recursive directory snapshots (`Get-SafeTreeSnapshot` and `Invoke-HandleTreeDeletion`).
 - **Reparse Point Test Fixtures**: Added automated sandbox tests for directory symlinks, file symlinks, dangling links, and parent reparse points.
-- **Bilingual Documentation**: Published comprehensive, symmetrically aligned English [README.md](README.md) and Simplified Chinese [README_zh-CN.md](README_zh-CN.md).
+- **Bilingual Documentation**: Published comprehensive, symmetrically aligned English and Simplified Chinese documentation (initially `README.md` + `README_zh-CN.md`, unified in Stage I into primary Simplified Chinese [README.md](README.md) and [README.en.md](README.en.md)).
 
 ---
 

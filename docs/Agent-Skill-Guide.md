@@ -1,15 +1,15 @@
-# Windows Claude Cleanup — Agent Skill Integration Guide
+# claude-cleanup — Agent Skill Integration Guide
 
-**Project:** Windows Claude Cleanup Toolkit  
-**Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
-**Language Navigation:** [English](../README.md) | [简体中文](../README_zh-CN.md)  
+**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
+**Repository:** `YUCZ-43/claude-cleanup`  
+**Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
 **Document Status:** Implemented (Stage D Cross-Agent Skill Package)
 
 ---
 
 ## 1. Overview / 概述
 
-This guide defines the specifications, security boundaries, and usage rules for deploying the Windows Claude Cleanup Toolkit as a canonical **Agent Skill** ([skills/claude-cleanup/](../skills/claude-cleanup/)).
+This guide defines the specifications, security boundaries, and usage rules for deploying the `claude-cleanup` toolkit as a canonical **Agent Skill** ([skills/claude-cleanup/](../skills/claude-cleanup/)).
 
 The skill is designed for multi-agent ecosystems, enabling AI engineering agents to run read-only audits, verified post-checks, and explicitly user-authorized cleanup operations safely without duplicating deletion logic.
 

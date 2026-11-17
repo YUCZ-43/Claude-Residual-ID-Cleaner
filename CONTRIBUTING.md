@@ -1,10 +1,10 @@
-# Contributing to Windows Claude Cleanup Toolkit
+# Contributing to claude-cleanup
 
-**Project:** Windows Claude Cleanup Toolkit  
-**Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
-**Language Navigation:** [English](README.md) | [简体中文](README_zh-CN.md)
+**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
+**Repository:** `YUCZ-43/claude-cleanup`  
+**Language Navigation:** [简体中文](README.md) | [English](README.en.md)
 
-Thank you for your interest in contributing to the Windows Claude Cleanup Toolkit. This document provides development principles, coding standards, safety boundaries, and the required pull request checklist.
+Thank you for your interest in contributing to **claude-cleanup**. This document provides development principles, coding standards, safety boundaries, and the required pull request checklist.
 
 ---
 
@@ -41,8 +41,8 @@ Every contribution must adhere to these foundational architectural invariants:
 ### Recommended Workspace
 Clone the repository locally:
 ```powershell
-git clone https://github.com/YUCZ-43/Windows-Claude-Cleanup.git
-cd Windows-Claude-Cleanup
+git clone https://github.com/YUCZ-43/claude-cleanup.git
+cd claude-cleanup
 ```
 
 ---
@@ -50,7 +50,7 @@ cd Windows-Claude-Cleanup
 ## 3. Coding & Documentation Standards
 
 - **Source Code & Identifiers**: Write all script functions, parameter names, C# P/Invoke structs, and technical comments in **English**.
-- **User Documentation**: Maintain bilingual alignment between [README.md](README.md) (English) and [README_zh-CN.md](README_zh-CN.md) (Simplified Chinese). Substantive feature additions, parameter changes, and safety modifications must be updated in both documents simultaneously.
+- **User Documentation**: Maintain bilingual alignment between [README.md](README.md) (Simplified Chinese primary) and [README.en.md](README.en.md) (English). Substantive feature additions, parameter changes, and safety modifications must be updated in both documents simultaneously.
 - **Markdown Links**: Use relative Markdown links between repository documentation files. Verify that all links resolve correctly without broken anchors.
 - **Conventional Commits**: Use clear Conventional Commit prefixes:
   - `feat(...)`: New capability (e.g., structured JSON output, diagnostic checks)

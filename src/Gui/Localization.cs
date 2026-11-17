@@ -38,7 +38,8 @@ namespace ClaudeResidualIdCleaner
                 d["AboutButton"] = "关于与安全承诺";
                 d["AboutTitle"] = "关于与安全边界承诺";
                 d["AboutBody"] =
-                    "Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner)\r\n\r\n" +
+                    "claude-cleanup — Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner)\r\n\r\n" +
+                    "项目仓库：https://github.com/YUCZ-43/claude-cleanup\r\n" +
                     "定位：专为清理 Claude 封号后残留在设备中的账号/设备 ID、认证 Token 与会话缓存而设计，绝不改动 Windows 系统本身。\r\n\r\n" +
                     "核心安全铁律：\r\n" +
                     "1. 启动零改动、默认 100% 只读扫描；\r\n" +
@@ -103,7 +104,8 @@ namespace ClaudeResidualIdCleaner
                 d["AboutButton"] = "About & Safety";
                 d["AboutTitle"] = "About & Safety Boundaries";
                 d["AboutBody"] =
-                    "Claude Residual ID Cleaner\r\n\r\n" +
+                    "claude-cleanup — Claude Residual ID Cleaner\r\n\r\n" +
+                    "Repository: https://github.com/YUCZ-43/claude-cleanup\r\n" +
                     "Positioning: Purpose-built to clean residual local account/device IDs, auth tokens, and session caches left behind after a Claude account ban — strictly without altering Windows OS itself.\r\n\r\n" +
                     "Security Guarantees:\r\n" +
                     "1. Zero changes on startup; scanning is 100% read-only;\r\n" +

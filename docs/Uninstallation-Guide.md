@@ -1,8 +1,8 @@
-# Windows Claude Cleanup — Uninstallation Guide
+# claude-cleanup — Uninstallation Guide
 
-**Project:** Windows Claude Cleanup Toolkit  
-**Repository:** `YUCZ-43/Windows-Claude-Cleanup`  
-**Language Navigation:** [English](../README.md) | [简体中文](../README_zh-CN.md)  
+**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
+**Repository:** `YUCZ-43/claude-cleanup`  
+**Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
 **Document Status:** Implemented (Claude Cleanup, Portable/Installed Toolkit Uninstaller, and Skill Uninstaller)
 
 ---
@@ -11,7 +11,7 @@
 
 This guide distinguishes three completely separate uninstallation processes:
 1. **Uninstalling Claude Software & Artifacts** (Claude Code CLI, Claude Desktop, VS Code extensions, and local AppData).
-2. **Uninstalling the Windows Claude Cleanup Toolkit** (removing this utility from your computer).
+2. **Uninstalling `claude-cleanup`** (removing this utility from your computer).
 3. **Uninstalling Optional Agent Skills** (removing skill integration from AI agent directories).
 
 ---
@@ -83,18 +83,18 @@ If you prefer not to use the automated toolkit, you can uninstall Claude compone
 
 ---
 
-## 3. Uninstalling the Windows Claude Cleanup Toolkit / 卸载本清理工具
+## 3. Uninstalling claude-cleanup / 卸载本清理工具
 
 The toolkit itself does not install background services, system drivers, or system-wide registry keys.
 
 ### Current Method: Portable Removal
 1. Delete the cloned or downloaded repository directory:
    ```powershell
-   Remove-Item -Recurse -Force "C:\Path\To\Windows-Claude-Cleanup"
+   Remove-Item -Recurse -Force "C:\Path\To\claude-cleanup"
    ```
 2. Any local gitignored reports created in the repository directory (`AUDIT.md`, `CLEANUP-PLAN.md`, `VERIFICATION.md`) will be deleted along with the directory.
 
-> **Important / 重要提示**: Deleting the Windows Claude Cleanup Toolkit does **not** delete or uninstall Claude Code or Claude Desktop.
+> **Important / 重要提示**: Deleting `claude-cleanup` does **not** delete or uninstall Claude Code or Claude Desktop.
 
 ### Dedicated User-Scoped Uninstaller (`scripts/Uninstall-ClaudeCleanup.ps1`)
 Run the user-scoped uninstaller script:
@@ -102,7 +102,7 @@ Run the user-scoped uninstaller script:
 powershell.exe -NoProfile -File .\scripts\Uninstall-ClaudeCleanup.ps1
 ```
 This script cleanly removes managed toolkit files and `.claude-cleanup-install.json` inside:
-- `%LOCALAPPDATA%\Programs\Windows-Claude-Cleanup` (preserves local `AUDIT.md`, `CLEANUP-PLAN.md`, and `VERIFICATION.md` reports unless `-RemoveReports` is specified)
+- `%LOCALAPPDATA%\Programs\claude-cleanup` (preserves local `AUDIT.md`, `CLEANUP-PLAN.md`, and `VERIFICATION.md` reports unless `-RemoveReports` is specified)
 
 ---
 

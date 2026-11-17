@@ -247,7 +247,7 @@ function Write-ToolkitUtf8NoBom {
 }
 
 function Get-DefaultInstallRoot {
-    return (Join-Path $env:LOCALAPPDATA 'Programs\Windows-Claude-Cleanup')
+    return (Join-Path $env:LOCALAPPDATA 'Programs\claude-cleanup')
 }
 
 function Get-ToolkitPayloadSpec {
@@ -265,7 +265,7 @@ function Get-ToolkitPayloadSpec {
         'ClaudeCleanupGUI.cmd',
         'scripts\ClaudeCleanupGUI.ps1',
         'README.md',
-        'README_zh-CN.md',
+        'README.en.md',
         'docs\gui-evaluation.md'
     )
 
@@ -628,12 +628,12 @@ function Invoke-ToolkitInstallAction {
     # Execution Phase
     $toolkitResult = $null
     if ($null -ne $toolkitPlan) {
-        if ($Cmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Install Windows Claude Cleanup Toolkit (no Claude application changes)')) {
+        if ($Cmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Install claude-cleanup toolkit (no Claude application changes)')) {
             $nowUtc = [DateTime]::UtcNow.ToString('o')
             $copied = @(Copy-ManagedFileSet -DestRoot $toolkitPlan.InstallRoot -FileItems $toolkitPlan.Payload)
             $manifestObj = [pscustomobject]@{
                 SchemaVersion = 1
-                ToolkitName = 'Windows-Claude-Cleanup'
+                ToolkitName = 'claude-cleanup'
                 InstalledUtc = $nowUtc
                 UpdatedUtc = $nowUtc
                 SourceRoot = $resolvedSource

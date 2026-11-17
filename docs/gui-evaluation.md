@@ -3,7 +3,7 @@
 **Status:** Implemented in Stage H ([ClaudeCleanupGUI.cmd](../ClaudeCleanupGUI.cmd) + [ClaudeCleanupGUI.ps1](../scripts/ClaudeCleanupGUI.ps1))  
 **Backend Contract:** [ClaudeCleanup.ps1](../ClaudeCleanup.ps1)  
 **Console Entrypoint:** [ClaudeCleanupLauncher.cmd](../ClaudeCleanupLauncher.cmd) + [ClaudeCleanupLauncher.ps1](../scripts/ClaudeCleanupLauncher.ps1)  
-**Project Documentation:** [README.md](../README.md) | [README_zh-CN.md](../README_zh-CN.md)
+**Project Documentation:** [README.md](../README.md) (简体中文) | [README.en.md](../README.en.md) (English)
 
 ---
 
