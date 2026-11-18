@@ -100,12 +100,14 @@ try {
         ($ciYaml -match 'actions/upload-artifact@v4') -and
         ($ciYaml -match 'claude-residual-id-cleaner-exe') -and
         ($ciYaml -match 'claude-residual-id-cleaner-setup-exe') -and
-        ($ciYaml -match 'claude-cleanup-release-bundle') -and
-        ($ciYaml -match 'Claude-Residual-ID-Cleaner\.exe') -and
-        ($ciYaml -match 'Claude-Residual-ID-Cleaner-Setup\.exe') -and
+        ($ciYaml -match 'claude-residual-id-cleaner-release-bundle') -and
+        ($ciYaml -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-portable\.exe') -and
+        ($ciYaml -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-setup\.exe') -and
+        ($ciYaml -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-bundle\.zip') -and
+        ($ciYaml -match 'NavTabCount -ne 3') -and
         ($ciYaml -match 'New-ReleasePackage\.ps1') -and
         ($ciYaml -match 'Build-Installer\.ps1')
-    ) 'CI workflow includes release-artifacts job building standalone .exe, Setup .exe, release ZIP, SHA256SUMS.txt, and actions/upload-artifact@v4'
+    ) 'CI workflow includes release-artifacts job building standardized x64 .exe, Setup .exe, bundle ZIP, SHA256SUMS.txt, NavTabCount=3 checks, and actions/upload-artifact@v4'
     Assert-True (($ciYaml -notmatch 'ExecutionPolicy\s+Bypass') -and ($ciYaml -notmatch '\s-Apply\b') -and ($ciYaml -notmatch 'Remove-AppxPackage') -and ($ciYaml -notmatch 'npm\s+uninstall')) 'CI workflow never invokes ExecutionPolicy Bypass or destructive uninstall/apply commands'
 
     # Sandboxed CI behavior simulation inside tests/sandbox/ci/
@@ -190,6 +192,9 @@ try {
         'execution-ledger.json',
         'custom.ledger.json',
         'dist/stale-release.zip',
+        'stale-0.1.0-x64-portable.exe',
+        'stale-0.1.0-x64-setup.exe',
+        'stale-0.1.0-x64-bundle.zip',
         'tests/sandbox/temp-fixture.txt',
         'sandbox/nested.txt',
         '.credentials.json',
@@ -224,8 +229,9 @@ try {
 
     $pkgResult = & $releaseScriptPath -SourceRoot $fakeRepo -OutputDirectory $customOut -Version '1.2.3-test'
     Assert-True (Test-Path -LiteralPath $pkgResult.PackagePath -PathType Leaf) 'Release ZIP created in caller -OutputDirectory'
+    Assert-True ($pkgResult.PackagePath -match 'Claude-Residual-ID-Cleaner-1\.2\.3-test-x64-bundle\.zip$') 'Release ZIP uses standardized Claude-Residual-ID-Cleaner-<Version>-<Arch>-bundle.zip naming'
     Assert-True (Test-Path -LiteralPath $pkgResult.Sha256SumsPath -PathType Leaf) 'SHA256SUMS.txt created in caller -OutputDirectory'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fakeRepo 'dist\claude-cleanup-1.2.3-test.zip'))) 'Caller -OutputDirectory does not write into SourceRoot/dist'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fakeRepo 'dist\Claude-Residual-ID-Cleaner-1.2.3-test-x64-bundle.zip'))) 'Caller -OutputDirectory does not write into SourceRoot/dist'
 
     $zipEntries = New-Object 'System.Collections.Generic.List[string]'
     $zipRead = [System.IO.Compression.ZipFile]::OpenRead($pkgResult.PackagePath)
@@ -249,9 +255,10 @@ try {
         $e = $_
         ($e -match '(?i)^(?:\.git|dist|tests/sandbox|sandbox|logs|\.claude|\.codex|\.agents|\.gemini|\.vscode)/') -or
         ($e -match '(?i)(?:AGENTS|GOAL|PLAN|HANDOFF|AUDIT|CLEANUP-PLAN|VERIFICATION)\.md$') -or
-        ($e -match '(?i)(?:credentials|secret|buddy-tokens|\.env|\.pfx|\.key|\.pem|\.log|\.tmp|\.bak|\.claude\.json|Thumbs\.db)')
+        ($e -match '(?i)(?:credentials|secret|buddy-tokens|\.env|\.pfx|\.key|\.pem|\.log|\.tmp|\.bak|\.claude\.json|Thumbs\.db)') -or
+        ($e -match '(?i)(?:-portable\.exe|-setup\.exe|-bundle\.zip)$')
     })
-    Assert-True ($leakedExclusions.Count -eq 0) 'Release ZIP excludes .git/, orchestration docs, audit/plan/verification, dist/, tests/sandbox/, credentials, and personal logs'
+    Assert-True ($leakedExclusions.Count -eq 0) 'Release ZIP excludes .git/, orchestration docs, audit/plan/verification, dist/, tests/sandbox/, credentials, personal logs, and stale release artifacts'
 
     # SHA-256 verification and tamper detection
     $sumsText = ([IO.File]::ReadAllText($pkgResult.Sha256SumsPath)).Trim()
@@ -300,7 +307,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $leakRepo 'README.md'), "Leaked SID: $fakeSid")
     $leakOut = Join-Path $releaseSandbox 'leak-out'
     Assert-Throws { & $releaseScriptPath -SourceRoot $leakRepo -OutputDirectory $leakOut -Version '0.0.1-leak' } 'New-ReleasePackage.ps1 fails closed when included file contains a user SID'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $leakOut 'claude-cleanup-0.0.1-leak.zip'))) 'Failed privacy gate leaves no release ZIP behind'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $leakOut 'Claude-Residual-ID-Cleaner-0.0.1-leak-x64-bundle.zip'))) 'Failed privacy gate leaves no release ZIP behind'
 
     # 5b. Sandboxed repo snapshot with src/Gui/* + scripts/Build-DesktopApp.ps1 bundles Claude-Residual-ID-Cleaner.exe at archive root
     $exeFakeRepo = Join-Path $releaseSandbox 'fake-exe-repo'
@@ -390,9 +397,24 @@ try {
         $demoGifValid -and
         ($rootReadmeText -match 'docs/images/demo-workflow\.gif') -and
         ($enReadmeText -match 'docs/images/demo-workflow\.gif') -and
-        ($rootReadmeText -match 'api\.star-history\.com/svg\?repos=YUCZ-43/claude-cleanup') -and
-        ($enReadmeText -match 'api\.star-history\.com/svg\?repos=YUCZ-43/claude-cleanup')
-    ) 'Animated demo-workflow.gif exists (>20 KB, valid GIF89a) and both READMEs embed demo GIF and Star History chart'
+        ($rootReadmeText -match 'api\.star-history\.com/svg\?repos=YUCZ-43/Claude-Residual-ID-Cleaner') -and
+        ($enReadmeText -match 'api\.star-history\.com/svg\?repos=YUCZ-43/Claude-Residual-ID-Cleaner')
+    ) 'Animated demo-workflow.gif exists (>20 KB, valid GIF89a) and both READMEs embed demo GIF and Star History chart for YUCZ-43/Claude-Residual-ID-Cleaner'
+
+    $noticeText = $utf8Strict.GetString([IO.File]::ReadAllBytes((Join-Path $repoRoot 'NOTICE')))
+    $licenseText = $utf8Strict.GetString([IO.File]::ReadAllBytes((Join-Path $repoRoot 'LICENSE')))
+    $cliRefText = $utf8Strict.GetString([IO.File]::ReadAllBytes((Join-Path $repoRoot 'docs\CLI-Reference.md')))
+    $rebrandCorpus = $rootReadmeText + "`n" + $enReadmeText + "`n" + $noticeText + "`n" + $licenseText + "`n" + $skillsGuideZhText + "`n" + $skillsGuideEnText + "`n" + $cliRefText
+    Assert-True (
+        ($rebrandCorpus -notmatch '(?i)suyuan2022|suyuan-skill') -and
+        ($rebrandCorpus -notmatch 'YUCZ-43/claude-cleanup') -and
+        ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-setup\.exe') -and
+        ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-portable\.exe') -and
+        ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-bundle\.zip') -and
+        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-setup\.exe') -and
+        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-portable\.exe') -and
+        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-bundle\.zip')
+    ) 'Public READMEs, NOTICE, LICENSE, and guides use clean MIT licensing, standardized 0.1.0-x64 release names, and zero suyuan2022 or old repo references'
 
     $docLinkFiles = @($rootReadmePath, $enReadmePath, $skillsGuideZhPath, $skillsGuideEnPath)
     $allDocLinksOk = $true

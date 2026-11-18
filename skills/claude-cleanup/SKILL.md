@@ -8,11 +8,11 @@ description: >-
   or execute explicitly approved cleanup targets without duplicating deletion logic.
 ---
 
-# Windows Claude Cleanup Skill
+# Claude Residual ID Cleaner Skill
 
 Use this skill to operate the native PowerShell backend (`ClaudeCleanup.ps1`) safely across **Codex CLI**, **Antigravity CLI**, **Gemini CLI**, and **Claude Code**.
 
-**Product Positioning**: **Claude 账号残余 ID 清理工具 (Claude Residual ID Cleaner)** — 专为清理 Claude 封号后残留在设备中的账号/设备 ID、认证 Token 与会话缓存而设计，绝不改动 Windows 系统本身 (non-destructive Windows utility to scan and safely clean leftover local Claude residuals after an account ban without altering Windows OS, hardware IDs, telemetry, or remote server state). Defaults to read-only `-Audit` and supports `-Language Auto|zh-CN|en-US`, CLI, and standalone desktop app builds (`scripts/Build-DesktopApp.ps1`).
+**Product Positioning**: **Claude Residual ID Cleaner (`Claude 账号残余 ID 清理工具`)** — 专为清理 Claude 封号后残留在设备中的账号/设备 ID、认证 Token 与会话缓存而设计，绝不改动 Windows 系统本身 (non-destructive Windows utility to scan and safely clean leftover local Claude residuals after an account ban without altering Windows OS, hardware IDs, telemetry, or remote server state). Defaults to read-only `-Audit` and supports `-Language Auto|zh-CN|en-US`, CLI, and standalone desktop app builds (`scripts/Build-DesktopApp.ps1`).
 
 ## Non-Negotiable Safety Rules
 
@@ -42,7 +42,7 @@ Use this skill to operate the native PowerShell backend (`ClaudeCleanup.ps1`) sa
 Before running any command, locate the repository root containing `ClaudeCleanup.ps1`:
 
 - If your current working directory is the toolkit repository, use `.\ClaudeCleanup.ps1`.
-- If the skill is installed in a user-scoped skills directory outside the repository, ask the user for their local `claude-cleanup` path or verify the path they provided before running anything.
+- If the skill is installed in a user-scoped skills directory outside the repository, ask the user for their local `Claude-Residual-ID-Cleaner` path or verify the path they provided before running anything.
 - Do not copy `ClaudeCleanup.ps1` into agent config folders (`.codex`, `.agents`, `.gemini`, `.claude`) or create custom deletion wrappers.
 
 ---

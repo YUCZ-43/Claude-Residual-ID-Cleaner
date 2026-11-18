@@ -2,8 +2,9 @@
 param(
     [string]$SourceRoot = '',
     [string]$OutputDirectory = '',
-    [string]$PackageName = 'claude-cleanup',
+    [string]$PackageName = 'Claude-Residual-ID-Cleaner',
     [string]$Version = '0.1.0',
+    [string]$Arch = 'x64',
     [string]$DesktopExePath = '',
     [switch]$ExcludeDesktopExe,
     [switch]$BuildSetupExe
@@ -21,6 +22,9 @@ if ([string]::IsNullOrWhiteSpace($PackageName) -or ($PackageName -notmatch '^[A-
 }
 if ([string]::IsNullOrWhiteSpace($Version) -or ($Version -notmatch '^[A-Za-z0-9._-]+$')) {
     throw "Invalid Version '$Version'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
+}
+if (-not [string]::IsNullOrEmpty($Arch) -and ($Arch -notmatch '^[A-Za-z0-9._-]+$')) {
+    throw "Invalid Arch '$Arch'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
 }
 if ([string]::IsNullOrWhiteSpace($SourceRoot) -or -not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
     throw "SourceRoot does not exist or is not a directory: $SourceRoot"
@@ -89,7 +93,8 @@ function Test-ReleaseExcludedPath {
         'Thumbs.db',
         'desktop.ini',
         '.DS_Store',
-        'Claude-Residual-ID-Cleaner.exe'
+        'Claude-Residual-ID-Cleaner.exe',
+        'Claude-Residual-ID-Cleaner-Setup.exe'
     )
     foreach ($name in $exactExcludedNames) {
         if ($leaf.Equals($name, [StringComparison]::OrdinalIgnoreCase)) {
@@ -97,7 +102,7 @@ function Test-ReleaseExcludedPath {
         }
     }
 
-    # Excluded filename patterns: local reports, ledgers, credentials, keys, certs, local overrides, logs, temps, backups, stale release zips
+    # Excluded filename patterns: local reports, ledgers, credentials, keys, certs, local overrides, logs, temps, backups, stale release artifacts
     $patternList = @(
         '(?i)\.audit\.md$',
         '(?i)\.plan\.md$',
@@ -112,7 +117,11 @@ function Test-ReleaseExcludedPath {
         '(?i)personal.*log',
         '(?i)\.(?:log|tmp|temp|bak|backup|rea\.backup|orig|stackdump)$',
         '(?i)^Windows-Claude-Cleanup-.*\.zip$',
-        '(?i)^claude-cleanup-.*\.zip$'
+        '(?i)^claude-cleanup-.*\.zip$',
+        '(?i)^Claude-Residual-ID-Cleaner-.*\.zip$',
+        '(?i)-portable\.exe$',
+        '(?i)-setup\.exe$',
+        '(?i)-bundle\.zip$'
     )
     foreach ($pat in $patternList) {
         if ($leaf -match $pat) {
@@ -252,7 +261,22 @@ try {
         New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
     }
 
-    $zipFileName = "$PackageName-$Version.zip"
+    $zipFileName = if ([string]::IsNullOrWhiteSpace($Arch)) {
+        "$PackageName-$Version.zip"
+    } else {
+        "$PackageName-$Version-$Arch-bundle.zip"
+    }
+    $portableFileName = if ([string]::IsNullOrWhiteSpace($Arch)) {
+        "$PackageName-$Version-portable.exe"
+    } else {
+        "$PackageName-$Version-$Arch-portable.exe"
+    }
+    $setupFileName = if ([string]::IsNullOrWhiteSpace($Arch)) {
+        "$PackageName-$Version-setup.exe"
+    } else {
+        "$PackageName-$Version-$Arch-setup.exe"
+    }
+
     $zipPath = Join-Path $resolvedOutputDir $zipFileName
     $tempZipPath = Join-Path $resolvedOutputDir ("$zipFileName.tmp-" + [Guid]::NewGuid().ToString('N'))
     $sumsPath = Join-Path $resolvedOutputDir 'SHA256SUMS.txt'
@@ -275,6 +299,69 @@ try {
         [IO.File]::Delete($zipPath)
     }
     [IO.File]::Move($tempZipPath, $zipPath)
+
+    $sha256Provider = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $zipStream = [IO.File]::OpenRead($zipPath)
+        try {
+            $hashBytes = $sha256Provider.ComputeHash($zipStream)
+        } finally {
+            $zipStream.Dispose()
+        }
+    } finally {
+        $sha256Provider.Dispose()
+    }
+    $sha256Hex = ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+
+    $portableExeOutPath = ''
+    $portableExeSha256 = ''
+    $setupExeOutPath = ''
+    $setupExeSha256 = ''
+    $sumLines = New-Object 'System.Collections.Generic.List[string]'
+
+    if ($BuildSetupExe) {
+        $buildInstallerScript = Join-Path $resolvedSourceRoot 'scripts\Build-Installer.ps1'
+        if (-not (Test-Path -LiteralPath $buildInstallerScript -PathType Leaf)) {
+            throw "Build-Installer.ps1 not found under: $resolvedSourceRoot"
+        }
+
+        if (-not $ExcludeDesktopExe -and -not [string]::IsNullOrEmpty($bundledExePath) -and (Test-Path -LiteralPath $bundledExePath -PathType Leaf)) {
+            $portableExeOutPath = Join-Path $resolvedOutputDir $portableFileName
+            $normBundled = [IO.Path]::GetFullPath($bundledExePath)
+            $normPortable = [IO.Path]::GetFullPath($portableExeOutPath)
+            if (-not $normBundled.Equals($normPortable, [StringComparison]::OrdinalIgnoreCase)) {
+                [IO.File]::Copy($bundledExePath, $portableExeOutPath, $true)
+            }
+            $portableExeSha256 = (Get-FileHash -LiteralPath $portableExeOutPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+
+        $setupExeOutPath = Join-Path $resolvedOutputDir $setupFileName
+        $setupBuildParams = @{
+            SourceDir    = (Join-Path $resolvedSourceRoot 'src\Installer')
+            GuiSourceDir = (Join-Path $resolvedSourceRoot 'src\Gui')
+            OutputPath   = $setupExeOutPath
+            Version      = $Version
+            Arch         = $Arch
+        }
+        if (-not [string]::IsNullOrEmpty($bundledExePath) -and (Test-Path -LiteralPath $bundledExePath -PathType Leaf)) {
+            $setupBuildParams['DesktopExePath'] = $bundledExePath
+        }
+        $setupBuildRes = & $buildInstallerScript @setupBuildParams
+        if ($null -eq $setupBuildRes -or -not $setupBuildRes.Succeeded -or -not (Test-Path -LiteralPath $setupExeOutPath -PathType Leaf)) {
+            throw "Failed to build $setupFileName during release packaging."
+        }
+        $setupExeSha256 = [string]$setupBuildRes.Sha256
+
+        $sumLines.Add("$setupExeSha256  $setupFileName")
+        if (-not [string]::IsNullOrEmpty($portableExeSha256)) {
+            $sumLines.Add("$portableExeSha256  $portableFileName")
+        }
+    }
+
+    $sumLines.Add("$sha256Hex  $zipFileName")
+    $sumsContent = ($sumLines.ToArray() -join "`n") + "`n"
+    $utf8NoBom = New-Object 'System.Text.UTF8Encoding'($false)
+    [IO.File]::WriteAllText($sumsPath, $sumsContent, $utf8NoBom)
 } finally {
     if (-not [string]::IsNullOrEmpty($tempZipPath) -and (Test-Path -LiteralPath $tempZipPath)) {
         try { [IO.File]::Delete($tempZipPath) } catch {}
@@ -284,50 +371,16 @@ try {
     }
 }
 
-$sha256Provider = [System.Security.Cryptography.SHA256]::Create()
-try {
-    $zipStream = [IO.File]::OpenRead($zipPath)
-    try {
-        $hashBytes = $sha256Provider.ComputeHash($zipStream)
-    } finally {
-        $zipStream.Dispose()
-    }
-} finally {
-    $sha256Provider.Dispose()
-}
-$sha256Hex = ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
-
-$sumsContent = "$sha256Hex  $zipFileName`n"
-$utf8NoBom = New-Object 'System.Text.UTF8Encoding'($false)
-[IO.File]::WriteAllText($sumsPath, $sumsContent, $utf8NoBom)
-
-$setupExeOutPath = ''
-$setupExeSha256 = ''
-if ($BuildSetupExe) {
-    $buildInstallerScript = Join-Path $resolvedSourceRoot 'scripts\Build-Installer.ps1'
-    if (-not (Test-Path -LiteralPath $buildInstallerScript -PathType Leaf)) {
-        throw "Build-Installer.ps1 not found under: $resolvedSourceRoot"
-    }
-    $setupExeOutPath = Join-Path $resolvedOutputDir 'Claude-Residual-ID-Cleaner-Setup.exe'
-    $setupBuildRes = & $buildInstallerScript `
-        -SourceDir (Join-Path $resolvedSourceRoot 'src\Installer') `
-        -GuiSourceDir (Join-Path $resolvedSourceRoot 'src\Gui') `
-        -OutputPath $setupExeOutPath `
-        -Version $Version
-    if ($null -eq $setupBuildRes -or -not $setupBuildRes.Succeeded -or -not (Test-Path -LiteralPath $setupExeOutPath -PathType Leaf)) {
-        throw 'Failed to build Claude-Residual-ID-Cleaner-Setup.exe during release packaging.'
-    }
-    $setupExeSha256 = [string]$setupBuildRes.Sha256
-}
-
 [pscustomobject]@{
-    PackagePath     = $zipPath
-    Sha256SumsPath  = $sumsPath
-    Sha256          = $sha256Hex
-    FileCount       = $sortedIncluded.Count
-    ExcludedCount   = $excludedPaths.Count
-    IncludedFiles   = @($sortedIncluded | ForEach-Object { $_.RelativePath })
-    ExcludedFiles   = @($excludedPaths)
-    SetupExePath    = $setupExeOutPath
-    SetupExeSha256  = $setupExeSha256
+    PackagePath        = $zipPath
+    Sha256SumsPath     = $sumsPath
+    Sha256             = $sha256Hex
+    FileCount          = $sortedIncluded.Count
+    ExcludedCount      = $excludedPaths.Count
+    IncludedFiles      = @($sortedIncluded | ForEach-Object { $_.RelativePath })
+    ExcludedFiles      = @($excludedPaths)
+    PortableExePath    = $portableExeOutPath
+    PortableExeSha256  = $portableExeSha256
+    SetupExePath       = $setupExeOutPath
+    SetupExeSha256     = $setupExeSha256
 }

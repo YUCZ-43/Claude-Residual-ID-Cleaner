@@ -1,9 +1,9 @@
-# claude-cleanup — Troubleshooting and Compatibility Guide
+# Claude Residual ID Cleaner — Troubleshooting and Compatibility Guide
 
-**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
-**Repository:** `YUCZ-43/claude-cleanup`  
+**Project:** Claude Residual ID Cleaner (`Claude 账号残余 ID 清理工具`)  
+**Repository:** `YUCZ-43/Claude-Residual-ID-Cleaner`  
 **Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
-**Document Status:** Implemented (v0.3.0)
+**Document Status:** Implemented (`v0.1.0`)
 
 ---
 

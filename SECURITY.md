@@ -1,10 +1,10 @@
 # Security Policy
 
-**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
-**Repository:** `YUCZ-43/claude-cleanup`  
+**Project:** Claude Residual ID Cleaner (`Claude 账号残余 ID 清理工具`)  
+**Repository:** `YUCZ-43/Claude-Residual-ID-Cleaner`  
 **Language Navigation:** [简体中文](README.md) | [English](README.en.md)
 
-The **claude-cleanup** toolkit is engineered with a strict **fail-closed**, **defense-in-depth** security architecture designed to prevent accidental data loss, path traversal, link following, privilege abuse, or replay attacks.
+The **Claude Residual ID Cleaner** toolkit is engineered with a strict **fail-closed**, **defense-in-depth** security architecture designed to prevent accidental data loss, path traversal, link following, privilege abuse, or replay attacks.
 
 ---
 
@@ -12,8 +12,8 @@ The **claude-cleanup** toolkit is engineered with a strict **fail-closed**, **de
 
 | Version | Supported | Description |
 | :--- | :--- | :--- |
-| `0.3.x` | Yes | Active development and release candidate branch |
-| `< 0.3.0` | No | Early prototypes and security remediation stages |
+| `0.1.x` / `main` | Yes | Current public release line (`v0.1.0`) and active hardening branch |
+| `< 0.1.0` | No | Early prototypes and pre-release stages |
 
 Security fixes and hardening enhancements are committed directly to the primary branch (`main`). Users and operators are urged to run the latest reviewed version.
 

@@ -1,10 +1,10 @@
-# Contributing to claude-cleanup
+# Contributing to Claude Residual ID Cleaner
 
-**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
-**Repository:** `YUCZ-43/claude-cleanup`  
+**Project:** Claude Residual ID Cleaner (`Claude 账号残余 ID 清理工具`)  
+**Repository:** `YUCZ-43/Claude-Residual-ID-Cleaner`  
 **Language Navigation:** [简体中文](README.md) | [English](README.en.md)
 
-Thank you for your interest in contributing to **claude-cleanup**. This document provides development principles, coding standards, safety boundaries, and the required pull request checklist.
+Thank you for your interest in contributing to **Claude Residual ID Cleaner**. This document provides development principles, coding standards, safety boundaries, and the required pull request checklist.
 
 ---
 
@@ -41,8 +41,8 @@ Every contribution must adhere to these foundational architectural invariants:
 ### Recommended Workspace
 Clone the repository locally:
 ```powershell
-git clone https://github.com/YUCZ-43/claude-cleanup.git
-cd claude-cleanup
+git clone https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner.git
+cd Claude-Residual-ID-Cleaner
 ```
 
 ---

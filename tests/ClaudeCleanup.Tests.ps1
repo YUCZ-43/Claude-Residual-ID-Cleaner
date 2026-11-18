@@ -767,6 +767,97 @@ try {
     $procApplyOut = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 $procPlanInfo.Sha256 -PlanPath $procPlanPath -VerificationPath $procVerPath -CandidatesOverride @($procCand) -ProcessesOverride $liveClaudeMock -CloseRunningProcesses -StopProcessAction { param($p) [void]$script:stoppedMockPids.Add([int]$p.Id) } -Confirm:$false
     Assert-True ($procApplyOut.Outcome -eq 'Succeeded' -and $script:stoppedMockPids.Count -eq 1 -and $script:stoppedMockPids[0] -eq 2001 -and $procApplyOut.Results[0].VerifiedAbsent -and (-not (Test-Path -LiteralPath $procTargetDir))) '-CloseRunningProcesses with confirmed -Apply invokes process shutdown once, deletes target, and verifies absence'
 
+    # Sandboxed Invoke-CleanupApply -EmitProgress streaming StdErr & clean StdOut JSON check
+    $emitDir = Join-Path $sandbox 'emit-progress-test'
+    $emitT1 = Join-Path $emitDir 't1'
+    $emitT2 = Join-Path $emitDir 't2'
+    $emitT3 = Join-Path $emitDir 't3'
+    New-Item -ItemType Directory -Path $emitT1, $emitT2, $emitT3 -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $emitT1 'a.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $emitT2 'b.json') -Value '{}'
+    Set-Content -LiteralPath (Join-Path $emitT3 'c.json') -Value '{}'
+
+    $emitC1 = Get-Candidate -Id 'emit-1' -Path $emitT1 -Category 'Cache' -Policy 'AccountData' -Kind 'Filesystem' -Decision 'Ready' -AllowedRoots @($emitDir)
+    $emitC2 = Get-Candidate -Id 'emit-2' -Path $emitT2 -Category 'Cache' -Policy 'AccountData' -Kind 'Filesystem' -Decision 'Ready' -AllowedRoots @($emitDir)
+    $emitPlanPath = Join-Path $emitDir 'PLAN-EMIT.md'
+    $emitVerPath = Join-Path $emitDir 'VER-EMIT.md'
+    $emitPlanInfo = Invoke-CleanupPlan -PlanPath $emitPlanPath -CandidatesOverride @($emitC1, $emitC2)
+
+    $emitC3 = Get-Candidate -Id 'emit-3' -Path $emitT3 -Category 'Cache' -Policy 'AccountData' -Kind 'Filesystem' -Decision 'Ready' -AllowedRoots @($emitDir)
+    $noEmitPlanPath = Join-Path $emitDir 'PLAN-NOEMIT.md'
+    $noEmitVerPath = Join-Path $emitDir 'VER-NOEMIT.md'
+    $noEmitPlanInfo = Invoke-CleanupPlan -PlanPath $noEmitPlanPath -CandidatesOverride @($emitC3)
+
+    $emitRunner = Join-Path $emitDir 'run-emit.ps1'
+    $emitRunnerBody = @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+. '$($scriptPath.Replace("'", "''"))'
+`$c1 = Get-Candidate -Id 'emit-1' -Path '$($emitT1.Replace("'", "''"))' -Category 'Cache' -Policy 'AccountData' -Kind 'Filesystem' -Decision 'Ready' -AllowedRoots @('$($emitDir.Replace("'", "''"))')
+`$c2 = Get-Candidate -Id 'emit-2' -Path '$($emitT2.Replace("'", "''"))' -Category 'Cache' -Policy 'AccountData' -Kind 'Filesystem' -Decision 'Ready' -AllowedRoots @('$($emitDir.Replace("'", "''"))')
+`$res = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 '$($emitPlanInfo.Sha256)' -PlanPath '$($emitPlanPath.Replace("'", "''"))' -VerificationPath '$($emitVerPath.Replace("'", "''"))' -CandidatesOverride @(`$c1, `$c2) -EmitProgress -Confirm:`$false
+`$res | ConvertTo-Json -Depth 6
+"@
+    [IO.File]::WriteAllText($emitRunner, $emitRunnerBody, (New-Object System.Text.UTF8Encoding($false)))
+
+    $noEmitRunner = Join-Path $emitDir 'run-noemit.ps1'
+    $noEmitRunnerBody = @"
+`$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+. '$($scriptPath.Replace("'", "''"))'
+`$c3 = Get-Candidate -Id 'emit-3' -Path '$($emitT3.Replace("'", "''"))' -Category 'Cache' -Policy 'AccountData' -Kind 'Filesystem' -Decision 'Ready' -AllowedRoots @('$($emitDir.Replace("'", "''"))')
+`$res = Invoke-CleanupApply -Policy 'AccountData' -ApprovedManifestSha256 '$($noEmitPlanInfo.Sha256)' -PlanPath '$($noEmitPlanPath.Replace("'", "''"))' -VerificationPath '$($noEmitVerPath.Replace("'", "''"))' -CandidatesOverride @(`$c3) -Confirm:`$false
+`$res | ConvertTo-Json -Depth 6
+"@
+    [IO.File]::WriteAllText($noEmitRunner, $noEmitRunnerBody, (New-Object System.Text.UTF8Encoding($false)))
+
+    $psExe = (Get-Process -Id $PID).Path
+    $psiEmit = New-Object System.Diagnostics.ProcessStartInfo
+    $psiEmit.FileName = $psExe
+    $psiEmit.Arguments = "-NoProfile -NonInteractive -File `"$emitRunner`""
+    $psiEmit.UseShellExecute = $false
+    $psiEmit.CreateNoWindow = $true
+    $psiEmit.RedirectStandardOutput = $true
+    $psiEmit.RedirectStandardError = $true
+    $psiEmit.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psiEmit.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    $pEmit = [System.Diagnostics.Process]::Start($psiEmit)
+    $emitOut = $pEmit.StandardOutput.ReadToEnd()
+    $emitErr = $pEmit.StandardError.ReadToEnd()
+    $pEmit.WaitForExit()
+    $emitJson = $emitOut | ConvertFrom-Json
+    $progressLines = @($emitErr -split "\r?\n" | Where-Object { $_ -like '@@PROGRESS@@*' })
+    $progressEvents = @($progressLines | ForEach-Object { ($_.Substring('@@PROGRESS@@'.Length)) | ConvertFrom-Json })
+
+    $psiNoEmit = New-Object System.Diagnostics.ProcessStartInfo
+    $psiNoEmit.FileName = $psExe
+    $psiNoEmit.Arguments = "-NoProfile -NonInteractive -File `"$noEmitRunner`""
+    $psiNoEmit.UseShellExecute = $false
+    $psiNoEmit.CreateNoWindow = $true
+    $psiNoEmit.RedirectStandardOutput = $true
+    $psiNoEmit.RedirectStandardError = $true
+    $psiNoEmit.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psiNoEmit.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    $pNoEmit = [System.Diagnostics.Process]::Start($psiNoEmit)
+    $noEmitOut = $pNoEmit.StandardOutput.ReadToEnd()
+    $noEmitErr = $pNoEmit.StandardError.ReadToEnd()
+    $pNoEmit.WaitForExit()
+    $noEmitJson = $noEmitOut | ConvertFrom-Json
+
+    Assert-True (
+        $pEmit.ExitCode -eq 0 -and
+        $emitJson.Outcome -eq 'Succeeded' -and
+        ($emitOut -notmatch '@@PROGRESS@@') -and
+        $progressEvents.Count -eq 4 -and
+        $progressEvents[0].Phase -eq 'Cleaning' -and $progressEvents[0].Index -eq 1 -and $progressEvents[0].Total -eq 2 -and $progressEvents[0].Id -eq 'emit-1' -and
+        $progressEvents[1].Phase -eq 'Result' -and $progressEvents[1].Status -eq 'Removed' -and $progressEvents[1].Id -eq 'emit-1' -and
+        $progressEvents[2].Phase -eq 'Cleaning' -and $progressEvents[2].Index -eq 2 -and $progressEvents[2].Total -eq 2 -and $progressEvents[2].Id -eq 'emit-2' -and
+        $progressEvents[3].Phase -eq 'Result' -and $progressEvents[3].Status -eq 'Removed' -and $progressEvents[3].Id -eq 'emit-2' -and
+        $pNoEmit.ExitCode -eq 0 -and
+        $noEmitJson.Outcome -eq 'Succeeded' -and
+        ($noEmitErr -notmatch '@@PROGRESS@@')
+    ) 'Invoke-CleanupApply -EmitProgress streams @@PROGRESS@@ JSON events to StdErr without polluting StdOut JSON and emits nothing when omitted'
+
     $notExecuted += 3
     Write-Output 'NOT_EXECUTED: live npm uninstall -g @anthropic-ai/claude-code (mocked only)'
     Write-Output 'NOT_EXECUTED: live code --uninstall-extension anthropic.claude-code (mocked only)'

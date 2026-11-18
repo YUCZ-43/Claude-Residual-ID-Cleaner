@@ -86,7 +86,7 @@ if ($uninstallSkillEffective) {
 # Execution Phase
 $toolkitResult = $null
 if ($null -ne $toolkitPlan) {
-    if ($PSCmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Uninstall claude-cleanup toolkit (does NOT remove Claude)')) {
+    if ($PSCmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Uninstall Claude Residual ID Cleaner toolkit (does NOT remove Claude)')) {
         $removal = Remove-ManagedFileList `
             -Root $toolkitPlan.InstallRoot `
             -RelativePaths $toolkitPlan.ManagedRel `

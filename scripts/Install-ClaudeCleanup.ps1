@@ -247,7 +247,7 @@ function Write-ToolkitUtf8NoBom {
 }
 
 function Get-DefaultInstallRoot {
-    return (Join-Path $env:LOCALAPPDATA 'Programs\claude-cleanup')
+    return (Join-Path $env:LOCALAPPDATA 'Programs\Claude-Residual-ID-Cleaner')
 }
 
 function Get-ToolkitPayloadSpec {
@@ -628,12 +628,12 @@ function Invoke-ToolkitInstallAction {
     # Execution Phase
     $toolkitResult = $null
     if ($null -ne $toolkitPlan) {
-        if ($Cmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Install claude-cleanup toolkit (no Claude application changes)')) {
+        if ($Cmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Install Claude Residual ID Cleaner toolkit (no Claude application changes)')) {
             $nowUtc = [DateTime]::UtcNow.ToString('o')
             $copied = @(Copy-ManagedFileSet -DestRoot $toolkitPlan.InstallRoot -FileItems $toolkitPlan.Payload)
             $manifestObj = [pscustomobject]@{
                 SchemaVersion = 1
-                ToolkitName = 'claude-cleanup'
+                ToolkitName = 'Claude-Residual-ID-Cleaner'
                 InstalledUtc = $nowUtc
                 UpdatedUtc = $nowUtc
                 SourceRoot = $resolvedSource

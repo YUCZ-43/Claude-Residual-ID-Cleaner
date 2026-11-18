@@ -207,6 +207,14 @@ try {
         (-not $usageGuideEnText.Contains([char]0xFFFD))
     ) 'Bilingual Skills-Usage-Guide docs contain zero emojis and zero UTF-8 replacement characters'
 
+    $combinedBrandDocs = $skillText + "`n" + $permText + "`n" + $installText + "`n" + $usageGuideZhText + "`n" + $usageGuideEnText
+    Assert-True (
+        ($combinedBrandDocs -notmatch '(?i)suyuan2022|suyuan-skill') -and
+        ($combinedBrandDocs -notmatch 'YUCZ-43/claude-cleanup') -and
+        ($usageGuideZhText -match 'YUCZ-43/Claude-Residual-ID-Cleaner') -and
+        ($usageGuideEnText -match 'YUCZ-43/Claude-Residual-ID-Cleaner')
+    ) 'Skill package and guides use YUCZ-43/Claude-Residual-ID-Cleaner branding with zero suyuan2022 references'
+
     # 5. Privacy & placeholder checks (zero personal user paths or SIDs)
     $allCheckedDocs = @($skillText, $permText, $installText, $usageGuideZhText, $usageGuideEnText, ($utf8Strict.GetString([IO.File]::ReadAllBytes($PSCommandPath))))
     $privacyLeak = $false

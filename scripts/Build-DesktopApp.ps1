@@ -1,11 +1,20 @@
 [CmdletBinding()]
 param(
     [string]$SourceDir = '',
-    [string]$OutputPath = ''
+    [string]$OutputPath = '',
+    [string]$Version = '0.1.0',
+    [string]$Arch = 'x64'
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($Version) -or ($Version -notmatch '^[A-Za-z0-9._-]+$')) {
+    throw "Invalid Version '$Version'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
+}
+if (-not [string]::IsNullOrEmpty($Arch) -and ($Arch -notmatch '^[A-Za-z0-9._-]+$')) {
+    throw "Invalid Arch '$Arch'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $resolvedSourceDir = if ([string]::IsNullOrWhiteSpace($SourceDir)) {
@@ -24,8 +33,14 @@ if (-not (Test-Path -LiteralPath $locCs -PathType Leaf) -or -not (Test-Path -Lit
     throw "Required C# WPF source files (Localization.cs, Program.cs) missing under: $resolvedSourceDir"
 }
 
+$defaultExeName = if ([string]::IsNullOrWhiteSpace($Arch)) {
+    "Claude-Residual-ID-Cleaner-$Version-portable.exe"
+} else {
+    "Claude-Residual-ID-Cleaner-$Version-$Arch-portable.exe"
+}
+
 $resolvedOutput = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    Join-Path $repoRoot 'dist\Claude-Residual-ID-Cleaner.exe'
+    Join-Path $repoRoot ("dist\$defaultExeName")
 } else {
     $rawOut = $OutputPath
     if (-not [System.IO.Path]::IsPathRooted($rawOut)) {
@@ -122,6 +137,8 @@ $sha256 = (Get-FileHash -LiteralPath $resolvedOutput -Algorithm SHA256).Hash.ToL
     Succeeded = $true
     Compiler = $cscExe
     OutputPath = $resolvedOutput
+    Version = $Version
+    Arch = $Arch
     SizeBytes = [int64]$fileInfo.Length
     Sha256 = $sha256
     TargetType = 'winexe (Zero-Console WPF)'

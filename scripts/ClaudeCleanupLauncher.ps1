@@ -264,8 +264,8 @@ function Invoke-LauncherAction {
             Invoke-LaunchGuiAction -Root $Root -Lang $Lang -DryExitOnly:$NonInteractiveExit
         }
         'Exit' {
-            if ($Lang -eq 'zh-CN') { Write-Output '正在退出 Windows Claude 残余清理启动器。' }
-            else { Write-Output 'Exiting Windows Claude Cleanup Launcher.' }
+            if ($Lang -eq 'zh-CN') { Write-Output '正在退出 Claude Residual ID Cleaner 启动器。' }
+            else { Write-Output 'Exiting Claude Residual ID Cleaner Launcher.' }
         }
         default {
             throw "Unsupported launcher action: $SelectedAction"
@@ -282,7 +282,7 @@ function Show-LauncherMenu {
     Write-Output ''
     Write-Output '============================================================'
     if ($Lang -eq 'zh-CN') {
-        Write-Output ' Claude 账号封号残余 ID 清理工具 - 安全菜单启动器 [zh-CN]'
+        Write-Output ' Claude Residual ID Cleaner (Claude 账号残余 ID 清理工具) - 安全菜单启动器 [zh-CN]'
         Write-Output '============================================================'
         Write-Output "工具根目录 : $Root"
         Write-Output '定位声明   : 仅扫描并清理 Claude 封号残余 · 绝不改动 Windows OS'
@@ -297,7 +297,7 @@ function Show-LauncherMenu {
         Write-Output '  [7] Exit         - 退出启动器'
         Write-Output '  [L] Switch Lang  - 切换语言为 English (en-US)'
     } else {
-        Write-Output ' Claude Residual ID Cleanup - Safe Console Launcher [en-US]'
+        Write-Output ' Claude Residual ID Cleaner - Safe Console Launcher [en-US]'
         Write-Output '============================================================'
         Write-Output "Toolkit Root : $Root"
         Write-Output 'Positioning  : Post-Ban Claude Residuals Only · Never Alters Windows OS'

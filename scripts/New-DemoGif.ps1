@@ -99,10 +99,10 @@ function New-StepFrameBitmap {
         $borderPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(62, 62, 66), 1.0)
         $g.DrawLine($borderPen, 0, $headerHeight - 1, $TargetWidth, $headerHeight - 1)
 
-        $badgeColor = if ($ActiveStepIndex -eq 2) {
+        $badgeColor = if ($ActiveStepIndex -eq ($StepLabels.Count - 1)) {
             [System.Drawing.Color]::FromArgb(22, 163, 74)
         } else {
-            [System.Drawing.Color]::FromArgb(0, 120, 212)
+            [System.Drawing.Color]::FromArgb(59, 130, 246)
         }
         $badgeBrush = New-Object System.Drawing.SolidBrush($badgeColor)
         $badgePath = New-RoundedRectPath -X 16 -Y 13 -Width 86 -Height 30 -Radius 6
@@ -122,15 +122,15 @@ function New-StepFrameBitmap {
         $leftFmt.Alignment = [System.Drawing.StringAlignment]::Near
         $leftFmt.LineAlignment = [System.Drawing.StringAlignment]::Center
 
-        $stepBadgeText = "STEP $($ActiveStepIndex + 1)/3"
+        $stepBadgeText = "STEP $($ActiveStepIndex + 1)/$($StepLabels.Count)"
         $badgeRect = New-Object System.Drawing.RectangleF(16, 13, 86, 30)
         $g.DrawString($stepBadgeText, $badgeFont, $whiteBrush, $badgeRect, $centerFmt)
 
-        $capRect = New-Object System.Drawing.RectangleF(114, 10, 630, 36)
+        $capRect = New-Object System.Drawing.RectangleF(114, 10, 550, 36)
         $g.DrawString($Caption, $captionFont, $whiteBrush, $capRect, $leftFmt)
 
-        $pillW = 108
-        $pillGap = 8
+        $pillW = 102
+        $pillGap = 6
         $startX = $TargetWidth - 16 - ($StepLabels.Count * $pillW + ($StepLabels.Count - 1) * $pillGap)
         for ($i = 0; $i -lt $StepLabels.Count; $i++) {
             $px = $startX + $i * ($pillW + $pillGap)
@@ -423,32 +423,42 @@ try {
 
     $png1 = Join-Path $workDir 'step1-idle.png'
     $png2 = Join-Path $workDir 'step2-scan.png'
-    $png3 = Join-Path $workDir 'step3-verified.png'
+    $png3 = Join-Path $workDir 'step3-cleaning.png'
+    $png4 = Join-Path $workDir 'step4-verified.png'
 
     Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png1`""
     Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-audit --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png2`""
-    Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-verified --dry-run --language zh-CN --nav 3 --toolkit-root `"$repoRoot`" --capture-png `"$png3`""
+    try {
+        Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-cleaning --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png3`""
+    } catch {
+        Write-Warning "Desktop executable did not support --demo-cleaning directly; falling back to --demo-audit frame for Step 3: $($_.Exception.Message)"
+        Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-audit --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png3`""
+    }
+    Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-verified --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png4`""
 
     $bmp1 = New-Object System.Drawing.Bitmap($png1)
     $bmp2 = New-Object System.Drawing.Bitmap($png2)
     $bmp3 = New-Object System.Drawing.Bitmap($png3)
+    $bmp4 = New-Object System.Drawing.Bitmap($png4)
     $bitmapsToDispose.Add($bmp1)
     $bitmapsToDispose.Add($bmp2)
     $bitmapsToDispose.Add($bmp3)
+    $bitmapsToDispose.Add($bmp4)
 
     $targetWidth = 1120
     $targetHeight = 790
-    $stepLabels = @('1. 只读体检', '2. 识别残留', '3. 核验清零')
-    $cap1 = '启动只读体检工作台 · 绝不改动 Windows 系统本身'
-    $cap2 = '扫描识别残余账号 UUID 与可清理缓存 · 严守安全红线'
-    $cap3 = '安全清理并核验完成 · 剩余可清理残留：0 项'
+    $stepLabels = @('1. 扫描面板', '2. 识别残余', '3. 实时清理', '4. 核验清零')
+    $cap1 = '启动只读扫描面板 · 默认零写入、绝不改动 Windows 系统'
+    $cap2 = '精准识别残余账号 UUID 与可清理缓存 · 严守安全红线'
+    $cap3 = '实时流式清理进度 · 逐项状态徽章即时更新'
+    $cap4 = '独立核验清零完成 · 剩余可清理残留：0 项'
 
     $gifFrames = New-Object 'System.Collections.Generic.List[System.Drawing.Bitmap]'
     $gifDelays = New-Object 'System.Collections.Generic.List[int]'
 
-    # Step 1 hold (1.8s)
+    # Step 1 hold (1.6s)
     $f1 = New-StepFrameBitmap -BaseA $bmp1 -ActiveStepIndex 0 -Caption $cap1 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-    $bitmapsToDispose.Add($f1); [void]$gifFrames.Add($f1); [void]$gifDelays.Add(180)
+    $bitmapsToDispose.Add($f1); [void]$gifFrames.Add($f1); [void]$gifDelays.Add(160)
 
     # Smooth transition 1 -> 2
     foreach ($alpha in @(0.30, 0.65)) {
@@ -456,9 +466,9 @@ try {
         $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
     }
 
-    # Step 2 hold (2.0s)
+    # Step 2 hold (1.8s)
     $f2 = New-StepFrameBitmap -BaseA $bmp2 -ActiveStepIndex 1 -Caption $cap2 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-    $bitmapsToDispose.Add($f2); [void]$gifFrames.Add($f2); [void]$gifDelays.Add(200)
+    $bitmapsToDispose.Add($f2); [void]$gifFrames.Add($f2); [void]$gifDelays.Add(180)
 
     # Smooth transition 2 -> 3
     foreach ($alpha in @(0.30, 0.65)) {
@@ -466,13 +476,23 @@ try {
         $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
     }
 
-    # Step 3 hold (2.0s)
+    # Step 3 hold (1.8s)
     $f3 = New-StepFrameBitmap -BaseA $bmp3 -ActiveStepIndex 2 -Caption $cap3 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-    $bitmapsToDispose.Add($f3); [void]$gifFrames.Add($f3); [void]$gifDelays.Add(200)
+    $bitmapsToDispose.Add($f3); [void]$gifFrames.Add($f3); [void]$gifDelays.Add(180)
 
-    # Smooth transition 3 -> 1 for clean loop
+    # Smooth transition 3 -> 4
     foreach ($alpha in @(0.30, 0.65)) {
-        $ft = New-StepFrameBitmap -BaseA $bmp3 -BaseB $bmp1 -BlendAlpha $alpha -ActiveStepIndex 0 -Caption $cap1 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
+        $ft = New-StepFrameBitmap -BaseA $bmp3 -BaseB $bmp4 -BlendAlpha $alpha -ActiveStepIndex 3 -Caption $cap4 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
+        $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
+    }
+
+    # Step 4 hold (2.0s)
+    $f4 = New-StepFrameBitmap -BaseA $bmp4 -ActiveStepIndex 3 -Caption $cap4 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
+    $bitmapsToDispose.Add($f4); [void]$gifFrames.Add($f4); [void]$gifDelays.Add(200)
+
+    # Smooth transition 4 -> 1 for clean loop
+    foreach ($alpha in @(0.30, 0.65)) {
+        $ft = New-StepFrameBitmap -BaseA $bmp4 -BaseB $bmp1 -BlendAlpha $alpha -ActiveStepIndex 0 -Caption $cap1 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
         $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
     }
 

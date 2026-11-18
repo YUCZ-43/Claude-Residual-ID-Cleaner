@@ -11,7 +11,8 @@ param(
     [ValidateSet('Auto', 'zh-CN', 'en-US')][string]$Language = 'Auto',
     [switch]$SaveAuditReport,
     [string]$AuditOutputPath = '',
-    [switch]$CloseRunningProcesses
+    [switch]$CloseRunningProcesses,
+    [switch]$EmitProgress
 )
 
 Set-StrictMode -Version 2.0
@@ -772,7 +773,11 @@ function Assert-AuthorizedPath {
     foreach ($p in $subtreeProtected) {
         if (-not $p) { continue }
         $base = Get-NormalPath $p
-        if ((Test-PathWithin $full $base) -and -not ($isApprovedTestPath -and $base.Equals($script:ProjectRoot, [StringComparison]::OrdinalIgnoreCase))) {
+        $allowSandboxUnderBase = $isApprovedTestPath -and (
+            $base.Equals($script:ProjectRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            (Test-PathWithin $script:ProjectRoot $base)
+        )
+        if ((Test-PathWithin $full $base) -and -not $allowSandboxUnderBase) {
             throw "Protected path: $full"
         }
     }
@@ -2755,6 +2760,38 @@ function Invoke-CleanupPlan {
     }
 }
 
+function Write-CleanupProgressEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Phase,
+        [Parameter(Mandatory = $true)][int]$Index,
+        [Parameter(Mandatory = $true)][int]$Total,
+        [Parameter(Mandatory = $true)][string]$Id,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string]$Status = '',
+        [string]$Error = ''
+    )
+    if ($Phase -eq 'Cleaning') {
+        $payload = [pscustomobject]@{
+            Phase = 'Cleaning'
+            Index = $Index
+            Total = $Total
+            Id = $Id
+            Path = $Path
+        }
+    } else {
+        $payload = [pscustomobject]@{
+            Phase = $Phase
+            Index = $Index
+            Total = $Total
+            Id = $Id
+            Path = $Path
+            Status = $Status
+            Error = $Error
+        }
+    }
+    [Console]::Error.WriteLine('@@PROGRESS@@' + ($payload | ConvertTo-Json -Compress))
+}
+
 function Invoke-CleanupApply {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
@@ -2765,7 +2802,8 @@ function Invoke-CleanupApply {
         [AllowNull()][object[]]$CandidatesOverride = $null,
         [switch]$CloseRunningProcesses,
         [AllowNull()][object[]]$ProcessesOverride = $null,
-        [AllowNull()][scriptblock]$StopProcessAction = $null
+        [AllowNull()][scriptblock]$StopProcessAction = $null,
+        [switch]$EmitProgress
     )
     $auth = Read-AuthorizedPlanDocument -PlanPath $PlanPath -ApprovedHash $ApprovedManifestSha256
     $manifest = $auth.Manifest
@@ -2877,15 +2915,24 @@ function Invoke-CleanupApply {
         if ($failed) {
             $pres = Get-RecordPresenceState -Record $record
             $rem = if ($pres.State -eq 'Present') { $true } elseif ($pres.State -eq 'Absent') { $false } else { $null }
+            $notExecErr = 'Aborted due to earlier target failure.'
             $results.Add([pscustomobject]@{
                 Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
                 Status = 'NotExecuted'; ItemsRemoved = 0; ItemsFailed = 0; PartialRemoval = $false
                 RemainingExists = $rem; PresenceState = $pres.State; VerifiedAbsent = ($pres.State -eq 'Absent')
-                Error = 'Aborted due to earlier target failure.'
+                Error = $notExecErr
             })
+            if ($EmitProgress) {
+                Write-CleanupProgressEvent -Phase 'Result' -Index ($idx + 1) -Total $selected.Count -Id $record.Id -Path $record.Path -Status 'NotExecuted' -Error $notExecErr
+            }
             continue
         }
 
+        if ($EmitProgress) {
+            Write-CleanupProgressEvent -Phase 'Cleaning' -Index ($idx + 1) -Total $selected.Count -Id $record.Id -Path $record.Path
+        }
+        $emitStatus = 'Removed'
+        $emitError = ''
         try {
             Assert-CurrentRecord -Record $record -Candidates $all
             if ($record.Kind -eq 'Filesystem') {
@@ -2895,6 +2942,8 @@ function Invoke-CleanupApply {
                 if ($res.Status -eq 'Failed') {
                     $failed = $true
                     $failureMessage = "Target $($record.Id) failed: $($res.Error)"
+                    $emitStatus = 'Failed'
+                    $emitError = [string]$res.Error
                     $results.Add([pscustomobject]@{
                         Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
                         Status = 'Failed'; ItemsRemoved = $res.ItemsRemoved; ItemsFailed = $res.ItemsFailed
@@ -2907,6 +2956,7 @@ function Invoke-CleanupApply {
                         throw "Post-deletion verification failed (PresenceState=$($pres.State)): $($pres.Error)"
                     }
                     $succeededCount++
+                    $emitStatus = [string]$res.Status
                     $results.Add([pscustomobject]@{
                         Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
                         Status = $res.Status; ItemsRemoved = $res.ItemsRemoved; ItemsFailed = 0
@@ -2966,6 +3016,8 @@ function Invoke-CleanupApply {
         } catch {
             $failed = $true
             $failureMessage = "Target $($record.Id) failed: $($_.Exception.Message)"
+            $emitStatus = 'Failed'
+            $emitError = [string]$_.Exception.Message
             $pres = Get-RecordPresenceState -Record $record
             $rem = if ($pres.State -eq 'Present') { $true } elseif ($pres.State -eq 'Absent') { $false } else { $null }
             $results.Add([pscustomobject]@{
@@ -2974,6 +3026,9 @@ function Invoke-CleanupApply {
                 RemainingExists = $rem; PresenceState = $pres.State
                 VerifiedAbsent = ($pres.State -eq 'Absent'); Error = $_.Exception.Message
             })
+        }
+        if ($EmitProgress) {
+            Write-CleanupProgressEvent -Phase 'Result' -Index ($idx + 1) -Total $selected.Count -Id $record.Id -Path $record.Path -Status $emitStatus -Error $emitError
         }
     }
 
@@ -3235,7 +3290,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         $applyResult = $null
         $applyPartialOrFailed = $false
         try {
-            $applyResult = Invoke-CleanupApply -Policy $Policy -ApprovedManifestSha256 $ApprovedManifestSha256 -PlanPath $script:PlanPath -VerificationPath $script:VerificationPath -CloseRunningProcesses:$CloseRunningProcesses -WhatIf:$WhatIfPreference -Confirm:$ConfirmPreference
+            $applyResult = Invoke-CleanupApply -Policy $Policy -ApprovedManifestSha256 $ApprovedManifestSha256 -PlanPath $script:PlanPath -VerificationPath $script:VerificationPath -CloseRunningProcesses:$CloseRunningProcesses -EmitProgress:$EmitProgress -WhatIf:$WhatIfPreference -Confirm:$ConfirmPreference
         } catch {
             if ($null -ne $_.Exception.Data -and $_.Exception.Data.Contains('ApplyResult') -and $null -ne $_.Exception.Data['ApplyResult']) {
                 $applyResult = $_.Exception.Data['ApplyResult']

@@ -1,7 +1,7 @@
-# claude-cleanup — Uninstallation Guide
+# Claude Residual ID Cleaner — Uninstallation Guide
 
-**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
-**Repository:** `YUCZ-43/claude-cleanup`  
+**Project:** Claude Residual ID Cleaner (`Claude 账号残余 ID 清理工具`)  
+**Repository:** `YUCZ-43/Claude-Residual-ID-Cleaner`  
 **Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
 **Document Status:** Implemented (Claude Cleanup, Portable/Installed Toolkit Uninstaller, and Skill Uninstaller)
 
@@ -11,7 +11,7 @@
 
 This guide distinguishes three completely separate uninstallation processes:
 1. **Uninstalling Claude Software & Artifacts** (Claude Code CLI, Claude Desktop, VS Code extensions, and local AppData).
-2. **Uninstalling `claude-cleanup`** (removing this utility from your computer).
+2. **Uninstalling Claude Residual ID Cleaner** (removing this utility from your computer).
 3. **Uninstalling Optional Agent Skills** (removing skill integration from AI agent directories).
 
 ---
@@ -20,7 +20,7 @@ This guide distinguishes three completely separate uninstallation processes:
 
 You can remove Claude software either using this toolkit (automated, handle-bound, cryptographically verified) or via native Windows manual mechanisms.
 
-### Option A: Using Windows Claude Cleanup Toolkit (`FullRemoval`)
+### Option A: Using Claude Residual ID Cleaner (`FullRemoval`)
 The toolkit provides verified, handle-bound removal of local Claude software, configuration files, caches, and registrations:
 
 1. **Close Running Claude Processes**:
@@ -83,18 +83,18 @@ If you prefer not to use the automated toolkit, you can uninstall Claude compone
 
 ---
 
-## 3. Uninstalling claude-cleanup / 卸载本清理工具
+## 3. Uninstalling Claude Residual ID Cleaner / 卸载本清理工具
 
 The toolkit itself does not install background services, system drivers, or system-wide registry keys.
 
 ### Current Method: Portable Removal
 1. Delete the cloned or downloaded repository directory:
    ```powershell
-   Remove-Item -Recurse -Force "C:\Path\To\claude-cleanup"
+   Remove-Item -Recurse -Force "C:\Path\To\Claude-Residual-ID-Cleaner"
    ```
 2. Any local gitignored reports created in the repository directory (`AUDIT.md`, `CLEANUP-PLAN.md`, `VERIFICATION.md`) will be deleted along with the directory.
 
-> **Important / 重要提示**: Deleting `claude-cleanup` does **not** delete or uninstall Claude Code or Claude Desktop.
+> **Important / 重要提示**: Deleting **Claude Residual ID Cleaner** does **not** delete or uninstall Claude Code or Claude Desktop.
 
 ### Dedicated User-Scoped Uninstaller (`scripts/Uninstall-ClaudeCleanup.ps1`)
 Run the user-scoped uninstaller script:
@@ -102,7 +102,7 @@ Run the user-scoped uninstaller script:
 powershell.exe -NoProfile -File .\scripts\Uninstall-ClaudeCleanup.ps1
 ```
 This script cleanly removes managed toolkit files and `.claude-cleanup-install.json` inside:
-- `%LOCALAPPDATA%\Programs\claude-cleanup` (preserves local `AUDIT.md`, `CLEANUP-PLAN.md`, and `VERIFICATION.md` reports unless `-RemoveReports` is specified)
+- `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner` (preserves local `AUDIT.md`, `CLEANUP-PLAN.md`, and `VERIFICATION.md` reports unless `-RemoveReports` is specified)
 
 ---
 

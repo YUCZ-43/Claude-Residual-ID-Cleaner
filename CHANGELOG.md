@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the **claude-cleanup** (`Claude Residual ID Cleaner`) project will be documented in this file.
+All notable changes to the **Claude Residual ID Cleaner** project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -10,9 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **Stage I — Repository Rebrand to `claude-cleanup` & Primary Simplified Chinese `README.md`**:
-  - Renamed repository/project metadata, GitHub repository (`YUCZ-43/claude-cleanup`), docs, installer/packager defaults (`%LOCALAPPDATA%\Programs\claude-cleanup`, `claude-cleanup-<Version>.zip`), and About text to `claude-cleanup`.
-  - Promoted Simplified Chinese documentation to primary [README.md](README.md) and moved full English documentation to [README.en.md](README.en.md), retiring legacy `README_zh-CN.md` with clean language switching bars and zero emojis.
+- **Full Project Rebrand to `Claude Residual ID Cleaner` & Standardized `x64` Release Artifacts**:
+  - Rebranded repository/project metadata, GitHub repository (`YUCZ-43/Claude-Residual-ID-Cleaner`), documentation, installers (`%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner`), and CI pipelines to **Claude Residual ID Cleaner** while preserving clean skill directory compatibility ([skills/claude-cleanup/](skills/claude-cleanup/)).
+  - Standardized release asset naming (`Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe`, `Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe`, `Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip`, `SHA256SUMS.txt`).
+  - Consolidated Desktop WPF UI into 3 cohesive views (`ModernDarkStudio` palette), defaulting to `zh-CN` on launch with live `en-US` toggle, real-time `@@PROGRESS@@` streaming progress, automatic post-clean verification, and a 4-step workflow GIF (`docs/images/demo-workflow.gif`).
+  - Cleaned up [LICENSE](LICENSE) and [NOTICE](NOTICE) as a fully independent MIT open-source utility.
+
+### Previously Recorded Milestones
+- **Primary Simplified Chinese `README.md` & Bilingual Parity**:
+  - Promoted Simplified Chinese documentation to primary [README.md](README.md) and full English documentation to [README.en.md](README.en.md) with clean language switching bars and zero emojis.
 
 ### Added
 - **Stage H (Desktop `.exe` Upgrade) — Standalone Zero-Console Windows WPF Desktop Application**:

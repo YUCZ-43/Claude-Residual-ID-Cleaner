@@ -327,7 +327,7 @@ jobs:
           $repoRoot = (Resolve-Path -LiteralPath '.').Path
           $smokeOut = Join-Path $env:RUNNER_TEMP ('release-smoke-' + [Guid]::NewGuid().ToString('N'))
           try {
-            $pkg = & (Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1') -OutputDirectory $smokeOut -Version '0.0.0-ci'
+            $pkg = & (Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1') -OutputDirectory $smokeOut -Version '0.0.0-ci' -Arch 'x64'
             if (-not (Test-Path -LiteralPath $pkg.PackagePath)) {
               throw "Release ZIP missing: $($pkg.PackagePath)"
             }
@@ -355,12 +355,12 @@ jobs:
 
           $repoRoot = (Resolve-Path -LiteralPath '.').Path
           $exeSmokeDir = Join-Path $env:RUNNER_TEMP ('desktop-exe-ci-' + [Guid]::NewGuid().ToString('N'))
-          $exeOut = Join-Path $exeSmokeDir 'Claude-Residual-ID-Cleaner.exe'
+          $exeOut = Join-Path $exeSmokeDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe'
           $selfTestJson = Join-Path $exeSmokeDir 'selftest.json'
           try {
-            $build = & (Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1') -OutputPath $exeOut
+            $build = & (Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1') -Version '0.1.0' -Arch 'x64' -OutputPath $exeOut
             if (-not $build.Succeeded -or -not (Test-Path -LiteralPath $exeOut -PathType Leaf)) {
-              throw 'Failed to compile Claude-Residual-ID-Cleaner.exe in CI.'
+              throw 'Failed to compile Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe in CI.'
             }
             $proc = [System.Diagnostics.Process]::Start($exeOut, "--headless --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$selfTestJson`"")
             $proc.WaitForExit()
@@ -368,7 +368,7 @@ jobs:
               throw "Standalone WPF .exe headless self-test exited $($proc.ExitCode)"
             }
             $report = [IO.File]::ReadAllText($selfTestJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-            if (-not $report.AppInstantiated -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled) {
+            if (-not $report.AppInstantiated -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled -or $report.NavTabCount -ne 3) {
               throw 'Standalone WPF .exe self-test reported invalid UI/safety state.'
             }
             Write-Host "DESKTOP_EXE_CI_OK: Built $($build.SizeBytes) bytes (SHA256=$($build.Sha256))."
@@ -400,13 +400,13 @@ jobs:
           if (-not (Test-Path -LiteralPath $artifactDir)) {
             New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
           }
-          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner.exe'
+          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe'
           $selfTestJson = Join-Path '${{ runner.temp }}' ('release-exe-selftest-' + [Guid]::NewGuid().ToString('N') + '.json')
 
           try {
-            $build = & (Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1') -OutputPath $exeOut
+            $build = & (Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1') -Version '0.1.0' -Arch 'x64' -OutputPath $exeOut
             if (-not $build.Succeeded -or -not (Test-Path -LiteralPath $exeOut -PathType Leaf)) {
-              throw 'Failed to compile Claude-Residual-ID-Cleaner.exe for release artifacts.'
+              throw 'Failed to compile Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe for release artifacts.'
             }
 
             $bytes = [System.IO.File]::ReadAllBytes($exeOut)
@@ -428,7 +428,7 @@ jobs:
               throw "Standalone WPF .exe headless self-test exited $($proc.ExitCode)"
             }
             $report = [IO.File]::ReadAllText($selfTestJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-            if (-not $report.AppInstantiated -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled -or (-not $report.HasWindowIcon)) {
+            if (-not $report.AppInstantiated -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled -or $report.NavTabCount -ne 3 -or (-not $report.HasWindowIcon)) {
               throw 'Standalone WPF .exe self-test reported invalid UI/safety state.'
             }
             Write-Host "RELEASE_EXE_OK: Built $($build.SizeBytes) bytes, PE Subsystem=$subsystem, SHA256=$($build.Sha256)."
@@ -446,16 +446,16 @@ jobs:
 
           $repoRoot = (Resolve-Path -LiteralPath '.').Path
           $artifactDir = Join-Path '${{ runner.temp }}' 'release-artifacts'
-          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner.exe'
-          $setupOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-Setup.exe'
+          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe'
+          $setupOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe'
           $setupSmokeDir = Join-Path '${{ runner.temp }}' ('setup-smoke-' + [Guid]::NewGuid().ToString('N'))
           $setupSelfTest = Join-Path $setupSmokeDir 'setup-selftest.json'
           $setupInstallRoot = Join-Path $setupSmokeDir 'installed-app'
 
           try {
-            $setupBuild = & (Join-Path $repoRoot 'scripts\Build-Installer.ps1') -OutputPath $setupOut -DesktopExePath $exeOut
+            $setupBuild = & (Join-Path $repoRoot 'scripts\Build-Installer.ps1') -Version '0.1.0' -Arch 'x64' -OutputPath $setupOut -DesktopExePath $exeOut
             if (-not $setupBuild.Succeeded -or -not (Test-Path -LiteralPath $setupOut -PathType Leaf)) {
-              throw 'Failed to compile Claude-Residual-ID-Cleaner-Setup.exe for release artifacts.'
+              throw 'Failed to compile Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe for release artifacts.'
             }
 
             $bytes = [System.IO.File]::ReadAllBytes($setupOut)
@@ -489,9 +489,10 @@ jobs:
 
           $repoRoot = (Resolve-Path -LiteralPath '.').Path
           $artifactDir = Join-Path '${{ runner.temp }}' 'release-artifacts'
-          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner.exe'
+          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe'
+          $setupOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe'
 
-          $pkg = & (Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1') -OutputDirectory $artifactDir -DesktopExePath $exeOut
+          $pkg = & (Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1') -OutputDirectory $artifactDir -Version '0.1.0' -Arch 'x64' -DesktopExePath $exeOut
           if (-not (Test-Path -LiteralPath $pkg.PackagePath -PathType Leaf)) {
             throw "Release ZIP missing: $($pkg.PackagePath)"
           }
@@ -520,27 +521,37 @@ jobs:
           if ($sumLine -ne $expectedLine) {
             throw "SHA256SUMS mismatch. Expected '$expectedLine', got '$sumLine'"
           }
-          Write-Host "RELEASE_BUNDLE_OK: $($pkg.FileCount) entries packaged (incl. Claude-Residual-ID-Cleaner.exe), SHA-256 verified ($actualHash)."
+
+          $setupHash = (Get-FileHash -LiteralPath $setupOut -Algorithm SHA256).Hash.ToLowerInvariant()
+          $portableHash = (Get-FileHash -LiteralPath $exeOut -Algorithm SHA256).Hash.ToLowerInvariant()
+          $allSumLines = @(
+            "$setupHash  $([IO.Path]::GetFileName($setupOut))",
+            "$portableHash  $([IO.Path]::GetFileName($exeOut))",
+            "$actualHash  $([IO.Path]::GetFileName($pkg.PackagePath))"
+          )
+          $utf8NoBom = New-Object 'System.Text.UTF8Encoding'($false)
+          [IO.File]::WriteAllText($pkg.Sha256SumsPath, (($allSumLines -join "`n") + "`n"), $utf8NoBom)
+          Write-Host "RELEASE_BUNDLE_OK: $($pkg.FileCount) entries packaged (incl. Claude-Residual-ID-Cleaner.exe), SHA-256 verified for setup/portable/bundle ($actualHash)."
 
       - name: Upload standalone Desktop .exe artifact
         uses: actions/upload-artifact@v4
         with:
           name: claude-residual-id-cleaner-exe
-          path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner.exe
+          path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe
           if-no-files-found: error
 
       - name: Upload standalone Setup Installer .exe artifact
         uses: actions/upload-artifact@v4
         with:
           name: claude-residual-id-cleaner-setup-exe
-          path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-Setup.exe
+          path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe
           if-no-files-found: error
 
       - name: Upload release bundle and SHA256SUMS.txt artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claude-cleanup-release-bundle
+          name: claude-residual-id-cleaner-release-bundle
           path: |
-            ${{ runner.temp }}/release-artifacts/*.zip
+            ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip
             ${{ runner.temp }}/release-artifacts/SHA256SUMS.txt
           if-no-files-found: error

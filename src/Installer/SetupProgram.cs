@@ -52,16 +52,7 @@ namespace ClaudeResidualIdCleanerSetup
     {
         public static string DetectDefaultLanguage()
         {
-            try
-            {
-                string name = CultureInfo.CurrentUICulture.Name ?? string.Empty;
-                if (name.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
-                {
-                    return "zh-CN";
-                }
-            }
-            catch { }
-            return "en-US";
+            return "zh-CN";
         }
 
         public static Dictionary<string, string> GetStrings(string lang)
@@ -70,9 +61,9 @@ namespace ClaudeResidualIdCleanerSetup
             bool zh = string.Equals(lang, "zh-CN", StringComparison.OrdinalIgnoreCase);
             if (zh)
             {
-                d["Title"] = "claude-cleanup 安装向导 — Claude 账号残余 ID 清理工具";
-                d["UninstallTitle"] = "claude-cleanup 卸载向导 — Claude 账号残余 ID 清理工具";
-                d["HeaderSub"] = "仅安装 claude-cleanup 工具包 · 绝不改动 Claude 本地数据或 Windows 系统";
+                d["Title"] = "Claude Residual ID Cleaner 安装向导 — Claude 账号残余 ID 清理工具";
+                d["UninstallTitle"] = "Claude Residual ID Cleaner 卸载向导 — Claude 账号残余 ID 清理工具";
+                d["HeaderSub"] = "仅安装 Claude Residual ID Cleaner 工具包 · 绝不改动 Claude 本地数据或 Windows 系统";
                 d["SafetyPill"] = "标准安全向导 · 支持用户目录免提权安装";
                 d["PrivStandard"] = "标准权限";
                 d["PrivAdmin"] = "管理员权限";
@@ -87,19 +78,19 @@ namespace ClaudeResidualIdCleanerSetup
                 d["BtnUninstall"] = "确认卸载工具包";
                 d["BtnClose"] = "关闭";
                 d["StatusReady"] = "就绪：请选择安装目录并点击“立即安装”。";
-                d["StatusUninstallReady"] = "就绪：将仅卸载 claude-cleanup 程序文件与快捷方式（保留用户审计报告及所有 Claude 数据）。";
+                d["StatusUninstallReady"] = "就绪：将仅卸载 Claude Residual ID Cleaner 程序文件与快捷方式（保留用户审计报告及所有 Claude 数据）。";
                 d["StatusInstalling"] = "正在校验路径并解压工具包...";
                 d["StatusUninstalling"] = "正在卸载托管文件与注册表卸载项...";
                 d["StatusDoneInstall"] = "安装成功！工具已安装至: {0}";
                 d["StatusDoneUninstall"] = "卸载完成：已移除 {0} 个托管文件。";
-                d["BrowseDesc"] = "选择 claude-cleanup 安装目录（工具将安装至该目录）";
+                d["BrowseDesc"] = "选择 Claude Residual ID Cleaner 安装目录（工具将安装至该目录）";
                 d["ScopeNote"] = "说明：默认安装至当前用户本地目录（无需管理员权限）；若以管理员运行，默认安装至 Program Files 并注册全局卸载项。";
             }
             else
             {
-                d["Title"] = "claude-cleanup Setup Wizard — Claude Residual ID Cleaner";
-                d["UninstallTitle"] = "claude-cleanup Uninstaller — Claude Residual ID Cleaner";
-                d["HeaderSub"] = "Installs claude-cleanup toolkit only · Never alters Claude data or Windows OS";
+                d["Title"] = "Claude Residual ID Cleaner Setup Wizard";
+                d["UninstallTitle"] = "Claude Residual ID Cleaner Uninstaller";
+                d["HeaderSub"] = "Installs Claude Residual ID Cleaner toolkit only · Never alters Claude data or Windows OS";
                 d["SafetyPill"] = "Safe Setup · User-Scope Install Without UAC";
                 d["PrivStandard"] = "Standard User";
                 d["PrivAdmin"] = "Administrator";
@@ -114,12 +105,12 @@ namespace ClaudeResidualIdCleanerSetup
                 d["BtnUninstall"] = "Uninstall Toolkit";
                 d["BtnClose"] = "Close";
                 d["StatusReady"] = "Ready: Review destination folder and click Install.";
-                d["StatusUninstallReady"] = "Ready: Removes only claude-cleanup managed files & shortcuts (preserves reports and all Claude data).";
+                d["StatusUninstallReady"] = "Ready: Removes only Claude Residual ID Cleaner managed files & shortcuts (preserves reports and all Claude data).";
                 d["StatusInstalling"] = "Validating destination path and extracting toolkit payload...";
                 d["StatusUninstalling"] = "Removing managed files and Add/Remove Programs entry...";
                 d["StatusDoneInstall"] = "Installation complete! Installed cleanly to: {0}";
                 d["StatusDoneUninstall"] = "Uninstall complete: removed {0} managed file(s).";
-                d["BrowseDesc"] = "Select installation folder for claude-cleanup";
+                d["BrowseDesc"] = "Select installation folder for Claude Residual ID Cleaner";
                 d["ScopeNote"] = "Note: Standard users install under %LOCALAPPDATA%\\Programs without UAC; running as Administrator defaults to Program Files.";
             }
             return d;
@@ -129,7 +120,7 @@ namespace ClaudeResidualIdCleanerSetup
     internal static class SetupEngine
     {
         internal const string ManifestFileName = ".claude-cleanup-install.json";
-        internal const string UninstallSubKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\claude-cleanup";
+        internal const string UninstallSubKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude-Residual-ID-Cleaner";
         internal const string PayloadResourceName = "ClaudeResidualIdCleanerSetup.payload.zip";
         internal const string IconResourceName = "ClaudeResidualIdCleanerSetup.app.ico";
 
@@ -156,11 +147,11 @@ namespace ClaudeResidualIdCleanerSetup
                 string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
                 if (!string.IsNullOrEmpty(pf))
                 {
-                    return Path.Combine(pf, "claude-cleanup");
+                    return Path.Combine(pf, "Claude-Residual-ID-Cleaner");
                 }
             }
             string localApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            return Path.Combine(localApp, @"Programs\claude-cleanup");
+            return Path.Combine(localApp, @"Programs\Claude-Residual-ID-Cleaner");
         }
 
         public static string ValidateSafeInstallRoot(string rawPath)
@@ -380,7 +371,7 @@ namespace ClaudeResidualIdCleanerSetup
                 {
                     string smBase = !string.IsNullOrEmpty(startMenuDirOverride)
                         ? startMenuDirOverride
-                        : Path.Combine(Environment.GetFolderPath(elevated ? Environment.SpecialFolder.CommonPrograms : Environment.SpecialFolder.Programs), "claude-cleanup");
+                        : Path.Combine(Environment.GetFolderPath(elevated ? Environment.SpecialFolder.CommonPrograms : Environment.SpecialFolder.Programs), "Claude Residual ID Cleaner");
                     if (!string.IsNullOrEmpty(smBase))
                     {
                         Directory.CreateDirectory(smBase);
@@ -388,8 +379,8 @@ namespace ClaudeResidualIdCleanerSetup
                         CreateWindowsShortcut(appLnk, targetApp, string.Empty, resolvedRoot, displayIcon, "Claude Residual ID Cleaner");
                         shortcutFiles.Add(appLnk);
 
-                        string uninstLnk = Path.Combine(smBase, "Uninstall claude-cleanup.lnk");
-                        CreateWindowsShortcut(uninstLnk, setupExeDestination, "--uninstall --install-dir \"" + resolvedRoot + "\"", resolvedRoot, displayIcon, "Uninstall claude-cleanup");
+                        string uninstLnk = Path.Combine(smBase, "Uninstall Claude Residual ID Cleaner.lnk");
+                        CreateWindowsShortcut(uninstLnk, setupExeDestination, "--uninstall --install-dir \"" + resolvedRoot + "\"", resolvedRoot, displayIcon, "Uninstall Claude Residual ID Cleaner");
                         shortcutFiles.Add(uninstLnk);
                         if (logger != null) logger("Created Start Menu shortcuts under: " + smBase);
                     }
@@ -399,7 +390,7 @@ namespace ClaudeResidualIdCleanerSetup
             var manifest = new SetupInstallManifest
             {
                 SchemaVersion = 1,
-                Product = "claude-cleanup",
+                Product = "Claude Residual ID Cleaner",
                 Version = "1.0.0.0",
                 InstalledBy = "Claude-Residual-ID-Cleaner-Setup",
                 InstalledUtc = DateTime.UtcNow.ToString("o"),
@@ -424,9 +415,9 @@ namespace ClaudeResidualIdCleanerSetup
                 {
                     if (key != null)
                     {
-                        key.SetValue("DisplayName", "Claude Residual ID Cleaner (claude-cleanup)", RegistryValueKind.String);
+                        key.SetValue("DisplayName", "Claude Residual ID Cleaner", RegistryValueKind.String);
                         key.SetValue("DisplayVersion", "1.0.0.0", RegistryValueKind.String);
-                        key.SetValue("Publisher", "claude-cleanup", RegistryValueKind.String);
+                        key.SetValue("Publisher", "Claude Residual ID Cleaner", RegistryValueKind.String);
                         key.SetValue("InstallLocation", resolvedRoot, RegistryValueKind.String);
                         key.SetValue("DisplayIcon", displayIcon, RegistryValueKind.String);
                         key.SetValue("UninstallString", uninstallCmd, RegistryValueKind.String);
@@ -461,7 +452,8 @@ namespace ClaudeResidualIdCleanerSetup
                 {
                     { "RegistryHive", hiveName },
                     { "RegistrySubKey", UninstallSubKey },
-                    { "DisplayName", "Claude Residual ID Cleaner (claude-cleanup)" },
+                    { "DisplayName", "Claude Residual ID Cleaner" },
+                    { "Publisher", "Claude Residual ID Cleaner" },
                     { "DisplayVersion", "1.0.0.0" },
                     { "InstallLocation", resolvedRoot },
                     { "DisplayIcon", displayIcon },
@@ -537,7 +529,8 @@ namespace ClaudeResidualIdCleanerSetup
                         File.Delete(lnk);
                         string parent = Path.GetDirectoryName(lnk);
                         if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent) &&
-                            string.Equals(Path.GetFileName(parent), "claude-cleanup", StringComparison.OrdinalIgnoreCase))
+                            (string.Equals(Path.GetFileName(parent), "Claude Residual ID Cleaner", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(Path.GetFileName(parent), "claude-cleanup", StringComparison.OrdinalIgnoreCase)))
                         {
                             try
                             {
@@ -695,16 +688,16 @@ namespace ClaudeResidualIdCleanerSetup
 
     public sealed class SetupWindow : Window
     {
-        private static readonly Brush BrushBgOuter = CreateBrush(30, 30, 30);
-        private static readonly Brush BrushBgChrome = CreateBrush(37, 37, 38);
-        private static readonly Brush BrushBgCard = CreateBrush(45, 45, 48);
-        private static readonly Brush BrushBgLog = CreateBrush(22, 22, 24);
-        private static readonly Brush BrushBorder = CreateBrush(62, 62, 66);
-        private static readonly Brush BrushAccent = CreateBrush(0, 120, 212);
-        private static readonly Brush BrushAccentBright = CreateBrush(55, 148, 255);
-        private static readonly Brush BrushSafetyBg = CreateBrush(18, 53, 36);
-        private static readonly Brush BrushSafetyBorder = CreateBrush(34, 197, 94);
-        private static readonly Brush BrushSafetyFg = CreateBrush(134, 239, 172);
+        private static readonly Brush BrushBgOuter = CreateBrush(24, 26, 31);          // #181A1F
+        private static readonly Brush BrushBgChrome = CreateBrush(29, 32, 38);         // #1D2026
+        private static readonly Brush BrushBgCard = CreateBrush(33, 37, 43);           // #21252B
+        private static readonly Brush BrushBgLog = CreateBrush(20, 22, 26);            // #14161A
+        private static readonly Brush BrushBorder = CreateBrush(50, 56, 66);           // #323842
+        private static readonly Brush BrushAccent = CreateBrush(59, 130, 246);         // #3B82F6
+        private static readonly Brush BrushAccentBright = CreateBrush(96, 165, 250);   // #60A5FA
+        private static readonly Brush BrushSafetyBg = CreateBrush(16, 42, 28);         // #102A1C
+        private static readonly Brush BrushSafetyBorder = CreateBrush(34, 197, 94);    // #22C55E
+        private static readonly Brush BrushSafetyFg = CreateBrush(134, 239, 172);      // #86EFAC
         private static readonly Brush BrushDanger = CreateBrush(153, 27, 27);
         private static readonly Brush BrushTextPrimary = CreateBrush(243, 244, 246);
         private static readonly Brush BrushTextSecondary = CreateBrush(156, 163, 175);
@@ -1012,9 +1005,9 @@ namespace ClaudeResidualIdCleanerSetup
                 if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK && !string.IsNullOrEmpty(dlg.SelectedPath))
                 {
                     string picked = dlg.SelectedPath;
-                    if (!string.Equals(Path.GetFileName(picked.TrimEnd('\\', '/')), "claude-cleanup", StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(Path.GetFileName(picked.TrimEnd('\\', '/')), "Claude-Residual-ID-Cleaner", StringComparison.OrdinalIgnoreCase))
                     {
-                        picked = Path.Combine(picked, "claude-cleanup");
+                        picked = Path.Combine(picked, "Claude-Residual-ID-Cleaner");
                     }
                     _txtInstallDir.Text = picked;
                 }

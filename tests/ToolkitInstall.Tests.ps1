@@ -111,6 +111,7 @@ try {
 
     # 2. Protected path rejections (dot-sourcing Install-ClaudeCleanup.ps1 helpers)
     . $installPs1
+    Assert-True -Condition ((Get-DefaultInstallRoot) -match 'Programs\\Claude-Residual-ID-Cleaner$') -Name 'installer default install root uses Programs\Claude-Residual-ID-Cleaner'
     Assert-Throws -Action { Assert-SafeManagedRoot -Path ([System.IO.Path]::GetPathRoot($sandbox)) -Purpose 'test' } -Name 'installer rejects drive root'
     Assert-Throws -Action { Assert-SafeManagedRoot -Path $env:USERPROFILE -Purpose 'test' } -Name 'installer rejects USERPROFILE root'
     Assert-Throws -Action { Assert-SafeManagedRoot -Path $env:APPDATA -Purpose 'test' } -Name 'installer rejects APPDATA root'
@@ -130,7 +131,7 @@ try {
     Assert-True -Condition ($LASTEXITCODE -eq 0) -Name 'ClaudeCleanupLauncher.ps1 -Exit succeeds without prompt'
 
     $actionExitOut = & $currentPsExe -NoProfile -File $launcherPs1 -Action Exit -Exit 2>&1
-    Assert-True -Condition ($LASTEXITCODE -eq 0 -and (($actionExitOut | Out-String) -match 'Exiting Windows Claude Cleanup Launcher')) -Name 'ClaudeCleanupLauncher.ps1 -Action Exit -Exit succeeds'
+    Assert-True -Condition ($LASTEXITCODE -eq 0 -and (($actionExitOut | Out-String) -match 'Exiting Claude Residual ID Cleaner Launcher')) -Name 'ClaudeCleanupLauncher.ps1 -Action Exit -Exit succeeds'
 
     $cmdHelpOut = & cmd.exe /c "`"$launcherCmd`" -Action Help -Exit" 2>&1
     Assert-True -Condition ($LASTEXITCODE -eq 0 -and (($cmdHelpOut | Out-String) -match 'ClaudeCleanup\.ps1')) -Name 'ClaudeCleanupLauncher.cmd -Action Help -Exit succeeds'

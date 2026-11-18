@@ -121,8 +121,8 @@ function Get-GuiStrings {
 
     if ($Lang -eq 'zh-CN') {
         return @{
-            WindowTitle = 'Claude 账号残余 ID 清理工具 (仅清理封号残余 · 绝不改系统)'
-            HeaderTitle = 'Claude 账号残余 ID 清理工具'
+            WindowTitle = 'Claude Residual ID Cleaner — Claude 账号残余 ID 清理工具 (仅清理封号残余 · 绝不改系统)'
+            HeaderTitle = 'Claude Residual ID Cleaner — Claude 账号残余 ID 清理工具'
             SafetyBadge = '仅清理 Claude 封号残余数据 · 绝不改动 Windows 系统本身'
             Subtitle = '专用于扫描并清理账号封禁后遗留的本地账号/设备元数据、授权缓存、会话与扩展状态 · 默认只读安全'
             LangToggle = '中 / EN (当前: 中文)'
@@ -167,8 +167,8 @@ function Get-GuiStrings {
         }
     }
     return @{
-        WindowTitle = 'Claude Residual ID Cleanup (Post-Ban Residuals Only · OS-Safe)'
-        HeaderTitle = 'Claude Residual ID Cleanup'
+        WindowTitle = 'Claude Residual ID Cleaner (Post-Ban Residuals Only · OS-Safe)'
+        HeaderTitle = 'Claude Residual ID Cleaner'
         SafetyBadge = 'Cleans Claude Banned-Account Residuals Only · Never Alters Windows OS'
         Subtitle = 'Scans and safely cleans leftover local account/device metadata, auth tokens, session caches, and extension state · Read-only default'
         LangToggle = '中 / EN (Active: EN)'

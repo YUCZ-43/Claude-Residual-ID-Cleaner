@@ -4,11 +4,19 @@ param(
     [string]$GuiSourceDir = '',
     [string]$OutputPath = '',
     [string]$DesktopExePath = '',
-    [string]$Version = '0.1.0'
+    [string]$Version = '0.1.0',
+    [string]$Arch = 'x64'
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($Version) -or ($Version -notmatch '^[A-Za-z0-9._-]+$')) {
+    throw "Invalid Version '$Version'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
+}
+if (-not [string]::IsNullOrEmpty($Arch) -and ($Arch -notmatch '^[A-Za-z0-9._-]+$')) {
+    throw "Invalid Arch '$Arch'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $resolvedSourceDir = if ([string]::IsNullOrWhiteSpace($SourceDir)) {
@@ -32,8 +40,14 @@ if (-not (Test-Path -LiteralPath $setupCs -PathType Leaf)) {
     throw "Required SetupProgram.cs missing under: $resolvedSourceDir"
 }
 
+$defaultSetupName = if ([string]::IsNullOrWhiteSpace($Arch)) {
+    "Claude-Residual-ID-Cleaner-$Version-setup.exe"
+} else {
+    "Claude-Residual-ID-Cleaner-$Version-$Arch-setup.exe"
+}
+
 $resolvedOutput = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    Join-Path $repoRoot 'dist\Claude-Residual-ID-Cleaner-Setup.exe'
+    Join-Path $repoRoot ("dist\$defaultSetupName")
 } else {
     $rawOut = $OutputPath
     if (-not [System.IO.Path]::IsPathRooted($rawOut)) {
@@ -112,7 +126,7 @@ try {
 
     $releasePkgScript = Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1'
     $payloadOutDir = Join-Path $tempWorkDir 'payload'
-    $pkg = & $releasePkgScript -SourceRoot $repoRoot -OutputDirectory $payloadOutDir -Version $Version -DesktopExePath $resolvedDesktopExe
+    $pkg = & $releasePkgScript -SourceRoot $repoRoot -OutputDirectory $payloadOutDir -Version $Version -Arch $Arch -DesktopExePath $resolvedDesktopExe
     if (-not (Test-Path -LiteralPath $pkg.PackagePath -PathType Leaf)) {
         throw "Failed to build embedded payload ZIP for Setup installer."
     }
@@ -157,6 +171,8 @@ try {
         Succeeded     = $true
         Compiler      = $cscExe
         OutputPath    = $resolvedOutput
+        Version       = $Version
+        Arch          = $Arch
         SizeBytes     = [int64]$fileInfo.Length
         Sha256        = $sha256
         TargetType    = 'winexe (Zero-Console WPF Setup Wizard)'

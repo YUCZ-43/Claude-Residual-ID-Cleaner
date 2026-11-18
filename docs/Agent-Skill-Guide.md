@@ -1,15 +1,15 @@
-# claude-cleanup — Agent Skill Integration Guide
+# Claude Residual ID Cleaner — Agent Skill Integration Guide
 
-**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
-**Repository:** `YUCZ-43/claude-cleanup`  
+**Project:** Claude Residual ID Cleaner (`Claude 账号残余 ID 清理工具`)  
+**Repository:** `YUCZ-43/Claude-Residual-ID-Cleaner`  
 **Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
-**Document Status:** Implemented (Stage D Cross-Agent Skill Package)
+**Document Status:** Implemented (Cross-Agent Skill Package)
 
 ---
 
 ## 1. Overview / 概述
 
-This guide defines the specifications, security boundaries, and usage rules for deploying the `claude-cleanup` toolkit as a canonical **Agent Skill** ([skills/claude-cleanup/](../skills/claude-cleanup/)).
+This guide defines the specifications, security boundaries, and usage rules for deploying the **Claude Residual ID Cleaner** toolkit as a canonical **Agent Skill** ([skills/claude-cleanup/](../skills/claude-cleanup/)).
 
 The skill is designed for multi-agent ecosystems, enabling AI engineering agents to run read-only audits, verified post-checks, and explicitly user-authorized cleanup operations safely without duplicating deletion logic.
 
@@ -92,4 +92,4 @@ description: >-
 ## 5. Skill Lifecycle Management / 技能生命周期管理
 
 - **Installation**: Copies `skills/claude-cleanup/` to the target agent's skill directory. It does not alter agent global preferences, telemetry, or authentication settings.
-- **Uninstallation**: Deletes the `claude-cleanup` directory from the agent's skill repository. Does not affect the underlying Windows Claude Cleanup Toolkit or Claude installations.
+- **Uninstallation**: Deletes the `claude-cleanup` directory from the agent's skill repository. Does not affect the underlying Claude Residual ID Cleaner toolkit or Claude installations.

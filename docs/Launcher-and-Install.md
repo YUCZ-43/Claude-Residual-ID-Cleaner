@@ -1,15 +1,15 @@
-# claude-cleanup — Launcher and Installation Guide
+# Claude Residual ID Cleaner — Launcher and Installation Guide
 
-**Project:** claude-cleanup (`Claude Residual ID Cleaner`)  
-**Repository:** `YUCZ-43/claude-cleanup`  
+**Project:** Claude Residual ID Cleaner (`Claude 账号残余 ID 清理工具`)  
+**Repository:** `YUCZ-43/Claude-Residual-ID-Cleaner`  
 **Language Navigation:** [简体中文](../README.md) | [English](../README.en.md)  
-**Document Status:** Implemented (Portable Mode, Native Windows Desktop GUI, Bilingual Console Launcher, and User-Scoped Installer/Updater/Uninstaller)
+**Document Status:** Implemented (Portable Mode, 3-View Modern Dark Studio WPF Desktop App, Bilingual Console Launcher, and User-Scoped Installer/Updater/Uninstaller)
 
 ---
 
 ## 1. Overview / 概述
 
-This document provides instructions for setting up and running `claude-cleanup`. The toolkit is designed with zero runtime dependencies beyond standard Windows operating system components (Windows 10/11, PowerShell 5.1 or PowerShell 7+, and .NET).
+This document provides instructions for setting up and running **Claude Residual ID Cleaner**. The toolkit is designed with zero runtime dependencies beyond standard Windows operating system components (Windows 10/11, PowerShell 5.1 or PowerShell 7+, and .NET).
 
 ---
 
@@ -19,13 +19,13 @@ In the current release, the toolkit is completely portable and requires no admin
 
 ### Step-by-Step Setup
 1. **Obtain the Toolkit**:
-   Clone the repository or download the source code as a ZIP archive:
+   Clone the repository or download the release bundle (`Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip`):
    ```powershell
-   git clone https://github.com/YUCZ-43/claude-cleanup.git
-   cd claude-cleanup
+   git clone https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner.git
+   cd Claude-Residual-ID-Cleaner
    ```
    Or extract to a dedicated user folder, such as:
-   `C:\Users\<USERNAME>\Tools\claude-cleanup`
+   `C:\Users\<USERNAME>\Tools\Claude-Residual-ID-Cleaner`
 
 2. **Inspect the Source Code**:
    Review [ClaudeCleanup.ps1](../ClaudeCleanup.ps1) and [SECURITY.md](../SECURITY.md) before execution.
@@ -72,14 +72,15 @@ In the current release, the toolkit is completely portable and requires no admin
 To support nontechnical users without installing an AI agent, the toolkit provides both a zero-dependency **WinForms Desktop GUI** and a lightweight **bilingual text-menu launcher**, supporting seamless `zh-CN` / `en-US` switching (`-Language Auto|zh-CN|en-US`) for cleaning Claude banned-account local residuals without altering Windows OS itself:
 
 ### Implemented Entrypoints
-- **Standalone WPF Desktop `.exe` (`scripts/Build-DesktopApp.ps1` -> `dist/Claude-Residual-ID-Cleaner.exe`)**: Compiles [src/Gui/Program.cs](../src/Gui/Program.cs) + [src/Gui/Localization.cs](../src/Gui/Localization.cs) into a zero-console native Windows WPF desktop executable (`IMAGE_SUBSYSTEM_WINDOWS_GUI`) using Windows 10/11 built-in `.NET Framework 4.x csc.exe`. Features live **中文 / English** toggling (defaulting to `zh-CN` on Chinese Windows locales), green safety badge (*"仅清理 Claude 封号残余数据 · 绝不改动 Windows 系统"*), 5 interactive target scope checkboxes, 4-step workflow toolbar (`1. 立即扫描体检 / Scan Residuals`, `2. 预览清理方案 / Preview Plan`, disabled-until-ready `3. 一键安全清理 / Clean Selected` with path-listing confirmation dialog, `4. 清理结果核验 / Verify Clean`), results DataGrid, and report/summary actions.
+- **Standalone WPF Desktop `.exe` (`scripts/Build-DesktopApp.ps1` -> `dist/Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe`)**: Compiles [src/Gui/Program.cs](../src/Gui/Program.cs) + [src/Gui/Localization.cs](../src/Gui/Localization.cs) into a zero-console native Windows WPF desktop executable (`IMAGE_SUBSYSTEM_WINDOWS_GUI`) using Windows 10/11 built-in `.NET Framework 4.x csc.exe`. Features a 3-view `ModernDarkStudio` layout (`1. Scan & Clean`, `2. Reports & Export`, `3. Safety & About`), default `zh-CN` launch with live **中文 / English** toggle, real-time `@@PROGRESS@@` cleaning progress + automatic post-verify 0-remaining summary banner, on-demand Admin elevation (`asInvoker`), and safe process close prompts.
+- **Standalone Setup Wizard (`scripts/Build-Installer.ps1` -> `dist/Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe`)**: User-scoped Setup installer deploying to `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner` without UAC.
 - **`ClaudeCleanupGUI.cmd` + `scripts/ClaudeCleanupGUI.ps1`**: Companion script-based WinForms GUI for running without building the `.exe`.
 - **`ClaudeCleanupLauncher.cmd`**: A minimal batch launcher at the repository/install root that locates `pwsh.exe` or falls back to `powershell.exe`.
 - **`scripts/ClaudeCleanupLauncher.ps1`**: An interactive bilingual text-mode menu script (supporting `-Language Auto|zh-CN|en-US`, `-Action`, `-Exit` smoke mode, and `[6] Launch GUI`).
 
 ```text
 ======================================================
- Claude Residual ID Cleanup - Safe Console Menu
+ Claude Residual ID Cleaner - Safe Console Menu
 ======================================================
   [1] Audit        - Read-only Claude residual discovery
   [2] Plan         - Generate CLEANUP-PLAN.md (SchemaVersion 3)
@@ -101,10 +102,10 @@ To support nontechnical users without installing an AI agent, the toolkit provid
 
 ## 5. User-Scoped Installer, Updater & Uninstaller / 用户级安装、升级与卸载脚本
 
-Lifecycle management scripts deploy cleanly within the user's local AppData profile (`%LOCALAPPDATA%\Programs\claude-cleanup`) with SHA-256 managed manifests (`.claude-cleanup-install.json` and `.claude-cleanup-skill-install.json`), without modifying system `PATH`, Start Menu shortcuts, registry keys, or Claude applications:
+Lifecycle management scripts deploy cleanly within the user's local AppData profile (`%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner`) with SHA-256 managed manifests (`.claude-cleanup-install.json` and `.claude-cleanup-skill-install.json`), without modifying system `PATH`, Start Menu shortcuts, registry keys, or Claude applications:
 
 ### `scripts/Install-ClaudeCleanup.ps1`
-- Installs toolkit scripts and docs into `%LOCALAPPDATA%\Programs\claude-cleanup` (override with `-InstallRoot`).
+- Installs toolkit scripts and docs into `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner` (override with `-InstallRoot`).
 - Optionally installs the canonical Agent Skill (`-InstallSkill` or `-SkillOnly` alongside `-SkillTarget Codex|Antigravity|Gemini|Claude|Agents|All`).
 - Validates reparse-point safety and protected paths atomically before writing any file.
 

@@ -114,7 +114,7 @@ if ($updateSkillEffective) {
 # Execution Phase
 $toolkitResult = $null
 if ($null -ne $toolkitPlan) {
-    if ($PSCmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Update claude-cleanup toolkit (local reports preserved; no Claude app changes)')) {
+    if ($PSCmdlet.ShouldProcess($toolkitPlan.InstallRoot, 'Update Claude Residual ID Cleaner toolkit (local reports preserved; no Claude app changes)')) {
         $copied = @(Copy-ManagedFileSet -DestRoot $toolkitPlan.InstallRoot -FileItems $toolkitPlan.Payload)
         $removedObsolete = @()
         if ($toolkitPlan.ObsoleteRelPaths.Count -gt 0) {
@@ -129,7 +129,7 @@ if ($null -ne $toolkitPlan) {
         }
         $updatedManifest = [pscustomobject]@{
             SchemaVersion = 1
-            ToolkitName = 'claude-cleanup'
+            ToolkitName = 'Claude-Residual-ID-Cleaner'
             InstalledUtc = $installedUtc
             UpdatedUtc = $nowUtc
             SourceRoot = $resolvedSource

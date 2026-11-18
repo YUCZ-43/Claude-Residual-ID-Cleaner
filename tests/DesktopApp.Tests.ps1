@@ -98,24 +98,33 @@ try {
     ) 'Desktop and Setup manifests strictly enforce asInvoker (never force UAC on startup)'
 
     Assert-True (
-        ($asmInfoText -match 'AssemblyProduct\("claude-cleanup"\)') -and
+        ($asmInfoText -match 'AssemblyProduct\("Claude Residual ID Cleaner"\)') -and
         ($asmInfoText -match 'AssemblyTitle\("Claude Residual ID Cleaner"\)') -and
         ($asmInfoText -match 'AssemblyVersion\(')
-    ) 'AssemblyInfo.cs defines product, title, and version metadata for standalone .exe'
+    ) 'AssemblyInfo.cs defines Claude Residual ID Cleaner product, title, and version metadata for standalone .exe'
 
     Assert-True (
-        ($progText -match '#1E1E1E') -and
-        ($progText -match '#252526') -and
-        ($progText -match '#2D2D30') -and
-        ($progText -match 'ThemeStyle\s*=\s*"AdobeDarkSlate"') -and
+        ($progText -match '#181A1F') -and
+        ($progText -match '#21252B') -and
+        ($progText -match '#282C34') -and
+        ($progText -match '#323842') -and
+        ($progText -match '#3B82F6') -and
+        ($progText -match '#22C55E') -and
+        ($progText -match 'ThemeStyle\s*=\s*"ModernDarkStudio"') -and
         ($progText -match 'SaveFileDialog') -and
         ($progText -match 'GridSplitter') -and
         ($progText -match 'HorizontalScrollBarVisibility\s*=\s*ScrollBarVisibility\.Auto') -and
         ($progText -match '_chkSelectAll') -and
         ($progText -match 'ResidualAccountIdRecord') -and
         ($progText -match '_btnRestartAdmin') -and
-        ($progText -match '_lblPrivilegeBadge')
-    ) 'Desktop WPF source defines Adobe dark palette, Stage K controls, privilege badge, and on-demand admin restart button'
+        ($progText -match '_lblPrivilegeBadge') -and
+        ($progText -match '-EmitProgress') -and
+        ($progText -match 'BeginErrorReadLine') -and
+        ($progText -match '@@PROGRESS@@') -and
+        ($progText -match '--demo-cleaning') -and
+        ($progText -match 'ApplyDemoCleaningState') -and
+        ($progText -match 'ProgressBar')
+    ) 'Desktop WPF source defines ModernDarkStudio palette, 3-view controls, streaming StdErr progress, --demo-cleaning, privilege badge, and on-demand admin restart button'
 
     $runasMatches = [regex]::Matches($progText, '(?i)Verb\s*=\s*"runas"')
     Assert-True (
@@ -145,7 +154,7 @@ try {
     $combinedCs = $locText + "`n" + $progText + "`n" + $asmInfoText + "`n" + $setupText
     $sidPattern = 'S-1-5-21-' + '\d+-\d+-\d+-\d+'
     $userPathPattern = '(?i)C:\\Users\\(?!(?:<USERNAME>|<USER>|<name>|username|user|example|Public|Default)(?:[\\"`\s]|$))[A-Za-z0-9._-]+\\'
-    Assert-True (($combinedCs -notmatch $sidPattern) -and ($combinedCs -notmatch $userPathPattern)) 'Desktop & Setup C# sources contain zero local user paths or Windows SIDs'
+    Assert-True (($combinedCs -notmatch $sidPattern) -and ($combinedCs -notmatch $userPathPattern) -and ($combinedCs -notmatch '(?i)suyuan2022')) 'Desktop & Setup C# sources contain zero local user paths, Windows SIDs, or suyuan2022 references'
 
     # 2b. Verify New-AppIcon.ps1 produces valid multi-resolution .ico (16, 32, 48, 256) and fallback programmatic PNG inside sandbox
     $icoFromLogo = Join-Path $appSandbox 'from-logo.ico'
@@ -179,11 +188,11 @@ try {
     $exeTextUtf8 = [System.Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($sandboxExe))
     Assert-True ($subsys -eq 2 -and $hasAssocIcon -and ($exeTextUtf8 -match 'level="asInvoker"')) "Compiled .exe uses Windows GUI subsystem ($subsys), embeds PE icon, and embeds asInvoker manifest"
 
-    # 5. Execute compiled .exe in non-destructive headless self-test mode (zh-CN -> en-US live toggle)
+    # 5. Execute compiled .exe in non-destructive headless self-test mode (default zh-CN without --language -> en-US live toggle)
     $outZh = Join-Path $appSandbox 'selftest-zh.json'
-    $pZh = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$outZh`"")
+    $pZh = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --dry-run --toolkit-root `"$repoRoot`" --self-test `"$outZh`"")
     $pZh.WaitForExit()
-    Assert-True ($pZh.ExitCode -eq 0 -and (Test-Path -LiteralPath $outZh -PathType Leaf)) 'Compiled desktop .exe executes zh-CN headless self-test cleanly'
+    Assert-True ($pZh.ExitCode -eq 0 -and (Test-Path -LiteralPath $outZh -PathType Leaf)) 'Compiled desktop .exe executes default zh-CN headless self-test cleanly without --language'
     $jZh = [IO.File]::ReadAllText($outZh, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     Assert-True (
         $jZh.AppInstantiated -and
@@ -191,21 +200,24 @@ try {
         $jZh.ToggledLanguage -eq 'en-US' -and
         $jZh.ScopeCheckboxCount -eq 5 -and
         $jZh.DataGridColumnCount -eq 5 -and
-        $jZh.NavTabCount -eq 5 -and
+        $jZh.NavTabCount -eq 3 -and
         $jZh.MetricCardCount -eq 4 -and
-        $jZh.ThemeStyle -eq 'AdobeDarkSlate' -and
+        $jZh.ThemeStyle -eq 'ModernDarkStudio' -and
         $jZh.HasGridSplitter -and
         $jZh.HasAccountIdCard -and
         $jZh.HorizontalScrollEnabled -and
         $jZh.HasWindowIcon -and
         $jZh.HasRestartAdminButton -and
+        $jZh.HasCleaningProgressPanel -and
+        $jZh.HasCompletionSummaryBanner -and
+        $jZh.HasReportsView -and
         (-not [string]::IsNullOrWhiteSpace($jZh.PrivilegeBadgeText)) -and
         (-not $jZh.InitialCleanButtonEnabled) -and
         $jZh.BackendFound -and
         $jZh.DryRun -and
         ($jZh.InitialSafetyPill -match '绝不改动 Windows 系统') -and
         ($jZh.ToggledSafetyPill -match 'Never Alters Windows OS')
-    ) 'Compiled WPF .exe validates zh-CN default, mascot Window.Icon, privilege badge, on-demand admin button, AdobeDarkSlate layout, and disabled Clean button'
+    ) 'Compiled WPF .exe validates default zh-CN, mascot Window.Icon, privilege badge, on-demand admin button, ModernDarkStudio 3-view layout, progress/banner panels, and disabled Clean button'
 
     # 6. Execute compiled .exe reverse toggle (en-US -> zh-CN)
     $outEn = Join-Path $appSandbox 'selftest-en.json'
@@ -216,12 +228,12 @@ try {
         $pEn.ExitCode -eq 0 -and
         $jEn.InitialLanguage -eq 'en-US' -and
         $jEn.ToggledLanguage -eq 'zh-CN' -and
-        $jEn.NavTabCount -eq 5 -and
+        $jEn.NavTabCount -eq 3 -and
         $jEn.MetricCardCount -eq 4 -and
-        $jEn.ThemeStyle -eq 'AdobeDarkSlate'
-    ) 'Compiled WPF .exe validates live en-US->zh-CN toggle and AdobeDarkSlate layout metrics'
+        $jEn.ThemeStyle -eq 'ModernDarkStudio'
+    ) 'Compiled WPF .exe validates live en-US->zh-CN toggle and ModernDarkStudio 3-view layout metrics'
 
-    # 7. Non-destructive --demo-audit --capture-png render inside tests/sandbox/desktop-app/
+    # 7. Non-destructive --demo-audit, --demo-cleaning, and --demo-verified --capture-png renders inside tests/sandbox/desktop-app/
     $demoPng = Join-Path $appSandbox 'demo-audit-capture.png'
     $pCap = [System.Diagnostics.Process]::Start($sandboxExe, "--demo-audit --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$demoPng`"")
     $pCap.WaitForExit()
@@ -242,6 +254,29 @@ try {
     }
     Assert-True $pngValid "Compiled WPF .exe --demo-audit --capture-png produces valid PNG >20 KB in sandbox ($pngLen bytes)"
 
+    $demoCleanPng = Join-Path $appSandbox 'demo-cleaning-capture.png'
+    $pCapClean = [System.Diagnostics.Process]::Start($sandboxExe, "--demo-cleaning --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$demoCleanPng`"")
+    $pCapClean.WaitForExit()
+    $outDemoClean = Join-Path $appSandbox 'selftest-demo-cleaning.json'
+    $pDemoCleanSt = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --demo-cleaning --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$outDemoClean`"")
+    $pDemoCleanSt.WaitForExit()
+    $jDemoClean = [IO.File]::ReadAllText($outDemoClean, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+
+    $demoVerPng = Join-Path $appSandbox 'demo-verified-capture.png'
+    $pCapVer = [System.Diagnostics.Process]::Start($sandboxExe, "--demo-verified --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$demoVerPng`"")
+    $pCapVer.WaitForExit()
+    $outDemoVer = Join-Path $appSandbox 'selftest-demo-verified.json'
+    $pDemoVerSt = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --demo-verified --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$outDemoVer`"")
+    $pDemoVerSt.WaitForExit()
+    $jDemoVer = [IO.File]::ReadAllText($outDemoVer, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+
+    Assert-True (
+        $pCapClean.ExitCode -eq 0 -and (Test-Path -LiteralPath $demoCleanPng -PathType Leaf) -and ((Get-Item -LiteralPath $demoCleanPng).Length -gt 20480) -and
+        $pDemoCleanSt.ExitCode -eq 0 -and $jDemoClean.CleaningProgressVisible -and (-not $jDemoClean.CompletionBannerVisible) -and
+        $pCapVer.ExitCode -eq 0 -and (Test-Path -LiteralPath $demoVerPng -PathType Leaf) -and ((Get-Item -LiteralPath $demoVerPng).Length -gt 20480) -and
+        $pDemoVerSt.ExitCode -eq 0 -and $jDemoVer.CompletionBannerVisible -and (-not $jDemoVer.CleaningProgressVisible)
+    ) 'Compiled WPF .exe --demo-cleaning and --demo-verified render real-time progress and 0-remaining completion summary banners cleanly'
+
     # 8. Verify --demo-audit populates non-secret residual Account IDs cleanly
     $outDemo = Join-Path $appSandbox 'selftest-demo.json'
     $pDemo = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --demo-audit --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$outDemo`"")
@@ -258,6 +293,7 @@ try {
     if ($null -ne $setupIcon) { $setupIcon.Dispose() }
     Assert-True ($setupBuildRes.Succeeded -and (Test-Path -LiteralPath $sandboxSetupExe -PathType Leaf) -and $setupSubsys -eq 2 -and $hasSetupPeIcon) 'Build-Installer.ps1 compiles standalone Claude-Residual-ID-Cleaner-Setup.exe cleanly with GUI subsystem and embedded icon'
 
+    $setupMockProfile = Join-Path $appSandbox 'mock-userprofile'
     $setupInstallTarget = Join-Path $appSandbox 'setup-install-target'
     $setupDesktopDir = Join-Path $appSandbox 'setup-desktop'
     $setupStartMenuDir = Join-Path $appSandbox 'setup-startmenu'
@@ -265,7 +301,12 @@ try {
     $setupInstOut = Join-Path $appSandbox 'setup-install-selftest.json'
     $setupUninstOut = Join-Path $appSandbox 'setup-uninstall-selftest.json'
 
-    $pSetupInst = [System.Diagnostics.Process]::Start($sandboxSetupExe, "--headless --no-registry --install-dir `"$setupInstallTarget`" --desktop-dir `"$setupDesktopDir`" --start-menu-dir `"$setupStartMenuDir`" --reg-out `"$setupRegJson`" --self-test `"$setupInstOut`"")
+    $psiSetupInst = New-Object System.Diagnostics.ProcessStartInfo
+    $psiSetupInst.FileName = $sandboxSetupExe
+    $psiSetupInst.Arguments = "--headless --no-registry --install-dir `"$setupInstallTarget`" --desktop-dir `"$setupDesktopDir`" --start-menu-dir `"$setupStartMenuDir`" --reg-out `"$setupRegJson`" --self-test `"$setupInstOut`""
+    $psiSetupInst.UseShellExecute = $false
+    $psiSetupInst.EnvironmentVariables['USERPROFILE'] = $setupMockProfile
+    $pSetupInst = [System.Diagnostics.Process]::Start($psiSetupInst)
     $pSetupInst.WaitForExit()
     $jSetupInst = [IO.File]::ReadAllText($setupInstOut, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     $jSetupReg = [IO.File]::ReadAllText($setupRegJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -274,14 +315,22 @@ try {
         $jSetupInst.Succeeded -and
         $jSetupInst.HasWindowIcon -and
         $jSetupReg.SkippedLiveRegistryWrite -and
+        ($jSetupReg.DisplayName -eq 'Claude Residual ID Cleaner') -and
+        ($jSetupReg.Publisher -eq 'Claude Residual ID Cleaner') -and
+        ($jSetupReg.RegistrySubKey -match 'Claude-Residual-ID-Cleaner') -and
         ($jSetupReg.UninstallString -match '--uninstall') -and
         (Test-Path -LiteralPath (Join-Path $setupInstallTarget 'Claude-Residual-ID-Cleaner.exe') -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $setupInstallTarget 'ClaudeCleanup.ps1') -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $setupDesktopDir 'Claude Residual ID Cleaner.lnk') -PathType Leaf) -and
-        (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall claude-cleanup.lnk') -PathType Leaf)
-    ) 'Compiled Setup .exe completes sandboxed install with payload, shortcuts, manifest, and zero live registry writes'
+        (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall Claude Residual ID Cleaner.lnk') -PathType Leaf)
+    ) 'Compiled Setup .exe completes sandboxed install with rebranded ARP metadata, payload, shortcuts, manifest, and zero live registry writes'
 
-    $pSetupUninst = [System.Diagnostics.Process]::Start($sandboxSetupExe, "--headless --uninstall --no-registry --install-dir `"$setupInstallTarget`" --self-test `"$setupUninstOut`"")
+    $psiSetupUninst = New-Object System.Diagnostics.ProcessStartInfo
+    $psiSetupUninst.FileName = $sandboxSetupExe
+    $psiSetupUninst.Arguments = "--headless --uninstall --no-registry --install-dir `"$setupInstallTarget`" --self-test `"$setupUninstOut`""
+    $psiSetupUninst.UseShellExecute = $false
+    $psiSetupUninst.EnvironmentVariables['USERPROFILE'] = $setupMockProfile
+    $pSetupUninst = [System.Diagnostics.Process]::Start($psiSetupUninst)
     $pSetupUninst.WaitForExit()
     $jSetupUninst = [IO.File]::ReadAllText($setupUninstOut, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     Assert-True (
@@ -290,7 +339,7 @@ try {
         $jSetupUninst.RemovedFileCount -ge 40 -and
         (-not (Test-Path -LiteralPath $setupInstallTarget)) -and
         (-not (Test-Path -LiteralPath (Join-Path $setupDesktopDir 'Claude Residual ID Cleaner.lnk'))) -and
-        (-not (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall claude-cleanup.lnk')))
+        (-not (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall Claude Residual ID Cleaner.lnk')))
     ) 'Compiled Setup .exe completes sandboxed uninstall removing managed files and shortcuts cleanly'
 
     # 10. Verify ANSI escape-code stripping and friendly bilingual "Claude is running" translation on compiled .exe assembly

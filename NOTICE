@@ -1,41 +1,42 @@
-claude-cleanup (Claude Residual ID Cleaner)
-Copyright (c) 2026 claude-cleanup Contributors
+Claude Residual ID Cleaner
+Copyright (c) 2026 Claude Residual ID Cleaner Contributors
 
-This product includes software developed as part of the claude-cleanup
-project (https://github.com/YUCZ-43/claude-cleanup).
+This product includes software developed as part of the Claude Residual ID Cleaner
+project (https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner).
 
 ===============================================================================
 1. Clean-Room Windows Implementation & Zero Third-Party Dependencies
 ===============================================================================
 
-This project is a clean-room implementation developed entirely in Windows
-PowerShell (compatible with Windows PowerShell 5.1 and PowerShell 7+) and
-native Win32 / .NET APIs.
+This project is an independent, clean-room Windows implementation developed in
+Windows PowerShell (compatible with Windows PowerShell 5.1 and PowerShell 7+)
+and native .NET Framework / Win32 platform APIs.
 
 - Zero Bundled Third-Party Code: This repository bundles no third-party
-  libraries, binary executables, node modules, or external PowerShell modules.
+  libraries, external binary executables, node modules, or external PowerShell
+  modules.
 - Zero Runtime Dependencies: All filesystem handle-bound deletion routines,
-  registry queries, Win32 P/Invoke structures, cryptographic hashing, and
-  serialization logic utilize standard built-in Windows platform interfaces.
+  registry queries, Win32 P/Invoke structures, cryptographic hashing, desktop
+  WPF compilation, and serialization logic utilize standard built-in Windows
+  platform interfaces.
 
 ===============================================================================
-2. Conceptual Origin & Architectural Independence
+2. Security-First Windows Architecture & Strict Non-Goals
 ===============================================================================
 
-The conceptual idea of auditing and cleaning local Claude-related artifacts
-was inspired by the macOS-oriented shell script project:
-- suyuan2022/claude-cleanup (https://github.com/suyuan2022/suyuan-skill)
+Claude Residual ID Cleaner is purpose-built for Windows NTFS and Windows user
+environments with strict fail-closed invariants:
 
-Architectural Separation & Non-Ported Features:
-- No code was copied or ported from the upstream macOS project.
-- Backup, trash/recycle-bin, and device-identity rotation or anti-abuse
-  modification behaviors present in upstream scripts were intentionally NOT
-  ported or implemented.
-- The Windows Claude Cleanup Toolkit was independently designed from scratch to
-  address Windows-specific architectures, including NTFS reparse point
-  protection, Windows Security Identifiers (SID) ownership verification,
-  Win32 handle-bound file disposition, atomic execution ledger persistence,
-  Windows Registry key validation, and Windows Package Management (MSIX/AppX).
+- NTFS reparse-point protection and Windows Security Identifier (SID) tree
+  ownership verification without mutating ACLs or taking ownership.
+- Win32 handle-bound file disposition (SetFileInformationByHandle) and open-
+  handle registry deletion (ntdll!NtDeleteKey) with zero Remove-Item fallback.
+- Deterministic SchemaVersion = 3 cleanup plans with single-use SHA-256
+  manifest binding and an atomic anti-replay execution ledger.
+- Strict non-goals: never alters Windows OS files, system hardware/device IDs
+  (such as MachineGuid), proxies, telemetry, or WSL distributions; never reads
+  Credential Manager secrets or environment variable values; never claims to
+  alter remote server-side account records.
 
 ===============================================================================
 3. Trademark Notice & Non-Affiliation
@@ -44,7 +45,7 @@ Architectural Separation & Non-Ported Features:
 "Claude", "Claude Code", "Claude Desktop", and associated names, logos, and
 trademarks are the property of Anthropic PBC.
 
-The Windows Claude Cleanup Toolkit is an independent, community-driven open-source
-software utility. It is NOT affiliated with, endorsed by, sponsored by, or
-in any way officially connected with Anthropic PBC, Microsoft Corporation, or
-any of their subsidiaries or affiliates.
+Claude Residual ID Cleaner is an independent, community-driven open-source
+software utility licensed under the MIT License. It is NOT affiliated with,
+endorsed by, sponsored by, or in any way officially connected with Anthropic
+PBC, Microsoft Corporation, or any of their subsidiaries or affiliates.
