@@ -744,8 +744,12 @@ function Assert-HandleIdentity {
         throw "Handle final path mismatch (possible path substitution): expected=$expectedFinal actual=$($id.FinalPath)"
     }
     if ($RequireOwnerMatch) {
-        $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-        if (-not $id.OwnerSid.Equals($currentSid, [StringComparison]::OrdinalIgnoreCase)) {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $currentSid = $identity.User.Value
+        $tokenOwnerSid = if ($null -ne $identity.Owner) { $identity.Owner.Value } else { $currentSid }
+        $isAllowedOwner = $id.OwnerSid.Equals($currentSid, [StringComparison]::OrdinalIgnoreCase) -or
+            $id.OwnerSid.Equals($tokenOwnerSid, [StringComparison]::OrdinalIgnoreCase)
+        if (-not $isAllowedOwner) {
             throw "Target is not owned by the current user: $ExpectedNormalPath"
         }
     }
