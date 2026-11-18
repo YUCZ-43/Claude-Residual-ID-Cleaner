@@ -1009,6 +1009,31 @@ function Invoke-HandleTreeDeletion {
     return $state
 }
 
+function New-SafeFileRemovalResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [int]$ItemsRemoved = 0,
+        [int]$ItemsFailed = 0,
+        [bool]$PartialRemoval = $false,
+        [AllowNull()]$RemainingExists = $false,
+        [Parameter(Mandatory = $true)][string]$PresenceState,
+        [bool]$VerifiedAbsent = $false,
+        [AllowEmptyString()][string]$Error = ''
+    )
+    return [pscustomobject]@{
+        Path = $Path
+        Status = $Status
+        ItemsRemoved = $ItemsRemoved
+        ItemsFailed = $ItemsFailed
+        PartialRemoval = $PartialRemoval
+        RemainingExists = $RemainingExists
+        PresenceState = $PresenceState
+        VerifiedAbsent = $VerifiedAbsent
+        Error = $Error
+    }
+}
+
 function Invoke-SafeFileRemoval {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -1022,86 +1047,35 @@ function Invoke-SafeFileRemoval {
     $preState = Get-TargetPresenceState $full
     if ($preState.State -eq 'Unknown') {
         $preErr = "Cannot verify target state before removal (Unknown): $($preState.Error)"
-        $unknownResult = [pscustomobject]@{
-            Path = $full
-            Status = 'Failed'
-            ItemsRemoved = 0
-            ItemsFailed = 1
-            PartialRemoval = $false
-            RemainingExists = $null
-            PresenceState = 'Unknown'
-            VerifiedAbsent = $false
-            Error = $preErr
-        }
+        $unknownResult = New-SafeFileRemovalResult -Path $full -Status 'Failed' -ItemsFailed 1 -RemainingExists $null -PresenceState 'Unknown' -Error $preErr
         if ($ReturnFailureResult) { return $unknownResult }
         $ex = New-Object System.IO.IOException($preErr)
         $ex.Data['RemovalResult'] = $unknownResult
         throw $ex
     }
     if ($preState.State -eq 'Absent') {
-        return [pscustomobject]@{
-            Path = $full
-            Status = 'AlreadyAbsent'
-            ItemsRemoved = 0
-            ItemsFailed = 0
-            PartialRemoval = $false
-            RemainingExists = $false
-            PresenceState = 'Absent'
-            VerifiedAbsent = $true
-            Error = ''
-        }
+        return (New-SafeFileRemovalResult -Path $full -Status 'AlreadyAbsent' -PresenceState 'Absent' -VerifiedAbsent $true)
     }
     Assert-TreeWithoutLinks $full
     if ($PSCmdlet.ShouldProcess($full, 'Permanently remove')) {
         $delState = Invoke-HandleTreeDeletion -NormalPath $full -ExpectedFileIndex $ExpectedFileIndex -ExpectedVolumeSerial $ExpectedVolumeSerial -RequireOwnerMatch
         $postState = Get-TargetPresenceState $full
         $remaining = if ($postState.State -eq 'Present') { $true } elseif ($postState.State -eq 'Absent') { $false } else { $null }
-        $verifiedAbsent = ($postState.State -eq 'Absent' -and $delState.ItemsFailed -eq 0)
         if ($delState.ItemsFailed -gt 0 -or $postState.State -ne 'Absent') {
             $errParts = New-Object 'System.Collections.Generic.List[string]'
             if ($delState.Errors.Count -gt 0) { $errParts.Add(($delState.Errors -join '; ')) }
             if ($postState.State -eq 'Present') { $errParts.Add("Target still exists after deletion attempt: $full") }
             elseif ($postState.State -eq 'Unknown') { $errParts.Add("Post-deletion presence check failed (Unknown): $($postState.Error)") }
             $errText = $errParts -join '; '
-            $failResult = [pscustomobject]@{
-                Path = $full
-                Status = 'Failed'
-                ItemsRemoved = $delState.ItemsRemoved
-                ItemsFailed = [Math]::Max(1, $delState.ItemsFailed)
-                PartialRemoval = ($delState.ItemsRemoved -gt 0 -and ($postState.State -ne 'Absent'))
-                RemainingExists = $remaining
-                PresenceState = $postState.State
-                VerifiedAbsent = $false
-                Error = $errText
-            }
+            $failResult = New-SafeFileRemovalResult -Path $full -Status 'Failed' -ItemsRemoved $delState.ItemsRemoved -ItemsFailed ([Math]::Max(1, $delState.ItemsFailed)) -PartialRemoval ($delState.ItemsRemoved -gt 0 -and ($postState.State -ne 'Absent')) -RemainingExists $remaining -PresenceState $postState.State -Error $errText
             if ($ReturnFailureResult) { return $failResult }
             $ex = New-Object System.IO.IOException($errText)
             $ex.Data['RemovalResult'] = $failResult
             throw $ex
         }
-        return [pscustomobject]@{
-            Path = $full
-            Status = 'Removed'
-            ItemsRemoved = $delState.ItemsRemoved
-            ItemsFailed = 0
-            PartialRemoval = $false
-            RemainingExists = $false
-            PresenceState = 'Absent'
-            VerifiedAbsent = $true
-            Error = ''
-        }
+        return (New-SafeFileRemovalResult -Path $full -Status 'Removed' -ItemsRemoved $delState.ItemsRemoved -PresenceState 'Absent' -VerifiedAbsent $true)
     }
-    return [pscustomobject]@{
-        Path = $full
-        Status = 'PreviewOnly'
-        ItemsRemoved = 0
-        ItemsFailed = 0
-        PartialRemoval = $false
-        RemainingExists = $true
-        PresenceState = 'Present'
-        VerifiedAbsent = $false
-        Error = ''
-    }
+    return (New-SafeFileRemovalResult -Path $full -Status 'PreviewOnly' -RemainingExists $true -PresenceState 'Present')
 }
 
 function Get-Sha256FromBytes {
@@ -1260,6 +1234,22 @@ function Get-NpmPrefixCandidates {
     return $candidates.ToArray()
 }
 
+function New-BlockedNpmInstallation {
+    param(
+        [Parameter(Mandatory = $true)][string]$PackagePath,
+        [Parameter(Mandatory = $true)][string]$PrefixPath,
+        [Parameter(Mandatory = $true)][string]$BlockReason
+    )
+    return [pscustomobject]@{
+        PackagePath = $PackagePath
+        PrefixPath = $PrefixPath
+        Version = $null
+        Shims = @()
+        SafeToUninstall = $false
+        BlockReason = $BlockReason
+    }
+}
+
 function Get-NpmClaudePackageInstallations {
     $results = New-Object 'System.Collections.Generic.List[object]'
     foreach ($prefix in (Get-NpmPrefixCandidates)) {
@@ -1268,14 +1258,7 @@ function Get-NpmClaudePackageInstallations {
         $pkgState = Get-TargetPresenceState $pkgJsonPath
         if ($pkgState.State -eq 'Absent') { continue }
         if ($pkgState.State -eq 'Unknown') {
-            $results.Add([pscustomobject]@{
-                PackagePath = $pkgDir
-                PrefixPath = $prefix
-                Version = $null
-                Shims = @()
-                SafeToUninstall = $false
-                BlockReason = "Cannot inspect npm package.json: $($pkgState.Error)"
-            })
+            $results.Add((New-BlockedNpmInstallation -PackagePath $pkgDir -PrefixPath $prefix -BlockReason "Cannot inspect npm package.json: $($pkgState.Error)"))
             continue
         }
         try {
@@ -1296,14 +1279,7 @@ function Get-NpmClaudePackageInstallations {
                 BlockReason = if ($safePkg.Allowed) { '' } else { $safePkg.Reason }
             })
         } catch {
-            $results.Add([pscustomobject]@{
-                PackagePath = $pkgDir
-                PrefixPath = $prefix
-                Version = $null
-                Shims = @()
-                SafeToUninstall = $false
-                BlockReason = "Cannot parse npm package metadata: $($_.Exception.Message)"
-            })
+            $results.Add((New-BlockedNpmInstallation -PackagePath $pkgDir -PrefixPath $prefix -BlockReason "Cannot parse npm package metadata: $($_.Exception.Message)"))
         }
     }
     return $results.ToArray()
@@ -2319,43 +2295,30 @@ function Write-AuditReportDocument {
     if ($report -and $report.PSObject.Properties['Summary'] -and $null -ne $report.Summary -and $report.Summary.PSObject.Properties['ResidualAccountIds'] -and $null -ne $report.Summary.ResidualAccountIds) {
         $accountIds = @($report.Summary.ResidualAccountIds)
     }
-    if ($isZh) {
-        $body.Add('## 已识别残余账号 / 设备 ID（仅非敏感 UUID 元数据）')
-        $body.Add('')
-        $body.Add('说明：以下仅提取本地非敏感 `accountUuid`、`organizationUuid`、`userId` 与设备/安装 ID 供与网页控制台核对；严禁读取或导出 OAuth Access/Refresh Token、`sessionKey` 或任何秘密凭据。')
-        $body.Add('')
-        if ($accountIds.Count -eq 0) {
-            $body.Add('- 未在可安全读取的本地配置文件中检测到残余账号/设备 ID。')
-        } else {
-            $body.Add('| 来源 | ID 类型 | 字段名 | 识别值 | 配置文件 |')
-            $body.Add('| :--- | :--- | :--- | :--- | :--- |')
-            foreach ($aid in $accountIds) {
-                $body.Add(('| {0} | {1} | `{2}` | `{3}` | `{4}` |' -f
-                    ([string]$aid.Source).Replace('|', '\|'),
-                    ([string]$aid.IdType).Replace('|', '\|'),
-                    ([string]$aid.Field).Replace('|', '\|'),
-                    ([string]$aid.Value).Replace('|', '\|'),
-                    ([string]$aid.ConfigPath).Replace('|', '\|')))
-            }
-        }
+    $idHeading = if ($isZh) { '## 已识别残余账号 / 设备 ID（仅非敏感 UUID 元数据）' } else { '## Detected Residual Account / Device IDs (Non-Secret UUID Metadata Only)' }
+    $idNote = if ($isZh) {
+        '说明：以下仅提取本地非敏感 `accountUuid`、`organizationUuid`、`userId` 与设备/安装 ID 供与网页控制台核对；严禁读取或导出 OAuth Access/Refresh Token、`sessionKey` 或任何秘密凭据。'
     } else {
-        $body.Add('## Detected Residual Account / Device IDs (Non-Secret UUID Metadata Only)')
-        $body.Add('')
-        $body.Add('Note: Extracts only non-secret `accountUuid`, `organizationUuid`, `userId`, and device/installation identifiers for user verification against the Claude web console; OAuth access/refresh tokens, `sessionKey`, and secrets are strictly never read or exported.')
-        $body.Add('')
-        if ($accountIds.Count -eq 0) {
-            $body.Add('- No residual account or device identifiers were found in safe readable local config files.')
-        } else {
-            $body.Add('| Source | ID Type | Field | Value | Config File |')
-            $body.Add('| :--- | :--- | :--- | :--- | :--- |')
-            foreach ($aid in $accountIds) {
-                $body.Add(('| {0} | {1} | `{2}` | `{3}` | `{4}` |' -f
-                    ([string]$aid.Source).Replace('|', '\|'),
-                    ([string]$aid.IdType).Replace('|', '\|'),
-                    ([string]$aid.Field).Replace('|', '\|'),
-                    ([string]$aid.Value).Replace('|', '\|'),
-                    ([string]$aid.ConfigPath).Replace('|', '\|')))
-            }
+        'Note: Extracts only non-secret `accountUuid`, `organizationUuid`, `userId`, and device/installation identifiers for user verification against the Claude web console; OAuth access/refresh tokens, `sessionKey`, and secrets are strictly never read or exported.'
+    }
+    $idEmpty = if ($isZh) { '- 未在可安全读取的本地配置文件中检测到残余账号/设备 ID。' } else { '- No residual account or device identifiers were found in safe readable local config files.' }
+    $idHeader = if ($isZh) { '| 来源 | ID 类型 | 字段名 | 识别值 | 配置文件 |' } else { '| Source | ID Type | Field | Value | Config File |' }
+    $body.Add($idHeading)
+    $body.Add('')
+    $body.Add($idNote)
+    $body.Add('')
+    if ($accountIds.Count -eq 0) {
+        $body.Add($idEmpty)
+    } else {
+        $body.Add($idHeader)
+        $body.Add('| :--- | :--- | :--- | :--- | :--- |')
+        foreach ($aid in $accountIds) {
+            $body.Add(('| {0} | {1} | `{2}` | `{3}` | `{4}` |' -f
+                ([string]$aid.Source).Replace('|', '\|'),
+                ([string]$aid.IdType).Replace('|', '\|'),
+                ([string]$aid.Field).Replace('|', '\|'),
+                ([string]$aid.Value).Replace('|', '\|'),
+                ([string]$aid.ConfigPath).Replace('|', '\|')))
         }
     }
     $body.Add('')
@@ -2792,6 +2755,40 @@ function Write-CleanupProgressEvent {
     [Console]::Error.WriteLine('@@PROGRESS@@' + ($payload | ConvertTo-Json -Compress))
 }
 
+function Invoke-VerifiedNonFsRemoval {
+    param(
+        [Parameter(Mandatory = $true)]$Record
+    )
+    $label = switch ($Record.Kind) {
+        'AppxPackage' {
+            Invoke-ClaudeAppxUninstall -PackageFullName $Record.Path
+            'Appx package post-removal'
+        }
+        'RegistryKey' {
+            Invoke-RegistryLeafKeyDeletion -Path $Record.Path -ExpectedDefaultValue ([string]$Record.Identity)
+            'Registry key post-deletion'
+        }
+        'NpmPackage' {
+            Invoke-NpmClaudeUninstall -PackageName '@anthropic-ai/claude-code' -PrefixPath ([string]$Record.Identity)
+            'npm package post-uninstall'
+        }
+        'VsCodeExtension' {
+            Invoke-VsCodeExtensionUninstall -ExtensionId $Record.Path
+            'VS Code extension post-uninstall'
+        }
+        default { throw "Unsupported non-filesystem cleanup kind: $($Record.Kind)" }
+    }
+    $pres = Get-RecordPresenceState -Record $Record
+    if ($pres.State -ne 'Absent') {
+        throw "$label verification failed (PresenceState=$($pres.State)): $($Record.Path) $($pres.Error)"
+    }
+    return [pscustomobject]@{
+        Id = $Record.Id; Policy = $Record.Policy; Kind = $Record.Kind; Path = $Record.Path
+        Status = 'Removed'; ItemsRemoved = 1; ItemsFailed = 0; PartialRemoval = $false
+        RemainingExists = $false; PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
+    }
+}
+
 function Invoke-CleanupApply {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
@@ -2964,54 +2961,9 @@ function Invoke-CleanupApply {
                         PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
                     })
                 }
-            } elseif ($record.Kind -eq 'AppxPackage') {
-                Invoke-ClaudeAppxUninstall -PackageFullName $record.Path
-                $pres = Get-RecordPresenceState -Record $record
-                if ($pres.State -ne 'Absent') {
-                    throw "Appx package post-removal verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
-                }
+            } elseif ($record.Kind -in @('AppxPackage', 'RegistryKey', 'NpmPackage', 'VsCodeExtension')) {
+                $results.Add((Invoke-VerifiedNonFsRemoval -Record $record))
                 $succeededCount++
-                $results.Add([pscustomobject]@{
-                    Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
-                    Status = 'Removed'; ItemsRemoved = 1; ItemsFailed = 0; PartialRemoval = $false
-                    RemainingExists = $false; PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
-                })
-            } elseif ($record.Kind -eq 'RegistryKey') {
-                Invoke-RegistryLeafKeyDeletion -Path $record.Path -ExpectedDefaultValue ([string]$record.Identity)
-                $pres = Get-RecordPresenceState -Record $record
-                if ($pres.State -ne 'Absent') {
-                    throw "Registry key post-deletion verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
-                }
-                $succeededCount++
-                $results.Add([pscustomobject]@{
-                    Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
-                    Status = 'Removed'; ItemsRemoved = 1; ItemsFailed = 0; PartialRemoval = $false
-                    RemainingExists = $false; PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
-                })
-            } elseif ($record.Kind -eq 'NpmPackage') {
-                Invoke-NpmClaudeUninstall -PackageName '@anthropic-ai/claude-code' -PrefixPath ([string]$record.Identity)
-                $pres = Get-RecordPresenceState -Record $record
-                if ($pres.State -ne 'Absent') {
-                    throw "npm package post-uninstall verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
-                }
-                $succeededCount++
-                $results.Add([pscustomobject]@{
-                    Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
-                    Status = 'Removed'; ItemsRemoved = 1; ItemsFailed = 0; PartialRemoval = $false
-                    RemainingExists = $false; PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
-                })
-            } elseif ($record.Kind -eq 'VsCodeExtension') {
-                Invoke-VsCodeExtensionUninstall -ExtensionId $record.Path
-                $pres = Get-RecordPresenceState -Record $record
-                if ($pres.State -ne 'Absent') {
-                    throw "VS Code extension post-uninstall verification failed (PresenceState=$($pres.State)): $($record.Path) $($pres.Error)"
-                }
-                $succeededCount++
-                $results.Add([pscustomobject]@{
-                    Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
-                    Status = 'Removed'; ItemsRemoved = 1; ItemsFailed = 0; PartialRemoval = $false
-                    RemainingExists = $false; PresenceState = 'Absent'; VerifiedAbsent = $true; Error = ''
-                })
             }
         } catch {
             $failed = $true

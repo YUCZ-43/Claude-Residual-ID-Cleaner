@@ -279,6 +279,7 @@ try {
     New-Item -ItemType Directory -Path $defaultScriptsDir -Force | Out-Null
     $copiedReleaseScript = Join-Path $defaultScriptsDir 'New-ReleasePackage.ps1'
     [IO.File]::Copy($releaseScriptPath, $copiedReleaseScript, $true)
+    [IO.File]::Copy((Join-Path $repoRoot 'scripts\Common-BuildHelpers.ps1'), (Join-Path $defaultScriptsDir 'Common-BuildHelpers.ps1'), $true)
     [IO.File]::WriteAllText((Join-Path $defaultRepo 'README.md'), '# Sandbox Default Dist Repo')
     [IO.File]::WriteAllText((Join-Path $defaultRepo '.git'), 'gitdir: ../fake-git')
     [IO.File]::WriteAllText((Join-Path $defaultRepo 'AGENTS.md'), '# excluded')
@@ -318,6 +319,7 @@ try {
     New-Item -ItemType Directory -Path $exeScriptsDir -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $exeFakeRepo 'README.md'), '# Sandboxed Desktop Bundle Test')
     [IO.File]::Copy((Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1'), (Join-Path $exeScriptsDir 'Build-DesktopApp.ps1'), $true)
+    [IO.File]::Copy((Join-Path $repoRoot 'scripts\Common-BuildHelpers.ps1'), (Join-Path $exeScriptsDir 'Common-BuildHelpers.ps1'), $true)
     [IO.File]::Copy($releaseScriptPath, (Join-Path $exeScriptsDir 'New-ReleasePackage.ps1'), $true)
     foreach ($guiItem in @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src\Gui') -File)) {
         [IO.File]::Copy($guiItem.FullName, (Join-Path $exeGuiDir $guiItem.Name), $true)

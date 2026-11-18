@@ -13,6 +13,8 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'Common-BuildHelpers.ps1')
+
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
     $SourceRoot = Split-Path -Parent $PSScriptRoot
 }
@@ -20,12 +22,7 @@ if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
 if ([string]::IsNullOrWhiteSpace($PackageName) -or ($PackageName -notmatch '^[A-Za-z0-9._-]+$')) {
     throw "Invalid PackageName '$PackageName'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
 }
-if ([string]::IsNullOrWhiteSpace($Version) -or ($Version -notmatch '^[A-Za-z0-9._-]+$')) {
-    throw "Invalid Version '$Version'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
-}
-if (-not [string]::IsNullOrEmpty($Arch) -and ($Arch -notmatch '^[A-Za-z0-9._-]+$')) {
-    throw "Invalid Arch '$Arch'. Allowed characters: A-Z, a-z, 0-9, '.', '_', '-'."
-}
+Test-BuildVersionAndArch -Version $Version -Arch $Arch
 if ([string]::IsNullOrWhiteSpace($SourceRoot) -or -not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
     throw "SourceRoot does not exist or is not a directory: $SourceRoot"
 }
@@ -35,11 +32,7 @@ $resolvedSourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path.TrimEnd('\', 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $resolvedOutputDir = Join-Path $resolvedSourceRoot 'dist'
 } else {
-    $rawOut = $OutputDirectory
-    if (-not [IO.Path]::IsPathRooted($rawOut)) {
-        $rawOut = Join-Path (Get-Location).Path $rawOut
-    }
-    $resolvedOutputDir = [IO.Path]::GetFullPath($rawOut).TrimEnd('\', '/')
+    $resolvedOutputDir = (Resolve-CallerPath -PathValue $OutputDirectory).TrimEnd('\', '/')
 }
 
 $outputRelPrefix = ''
@@ -264,18 +257,10 @@ try {
     $zipFileName = if ([string]::IsNullOrWhiteSpace($Arch)) {
         "$PackageName-$Version.zip"
     } else {
-        "$PackageName-$Version-$Arch-bundle.zip"
+        Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $Arch -Suffix 'bundle.zip'
     }
-    $portableFileName = if ([string]::IsNullOrWhiteSpace($Arch)) {
-        "$PackageName-$Version-portable.exe"
-    } else {
-        "$PackageName-$Version-$Arch-portable.exe"
-    }
-    $setupFileName = if ([string]::IsNullOrWhiteSpace($Arch)) {
-        "$PackageName-$Version-setup.exe"
-    } else {
-        "$PackageName-$Version-$Arch-setup.exe"
-    }
+    $portableFileName = Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $Arch -Suffix 'portable.exe'
+    $setupFileName = Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $Arch -Suffix 'setup.exe'
 
     $zipPath = Join-Path $resolvedOutputDir $zipFileName
     $tempZipPath = Join-Path $resolvedOutputDir ("$zipFileName.tmp-" + [Guid]::NewGuid().ToString('N'))
@@ -300,18 +285,7 @@ try {
     }
     [IO.File]::Move($tempZipPath, $zipPath)
 
-    $sha256Provider = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $zipStream = [IO.File]::OpenRead($zipPath)
-        try {
-            $hashBytes = $sha256Provider.ComputeHash($zipStream)
-        } finally {
-            $zipStream.Dispose()
-        }
-    } finally {
-        $sha256Provider.Dispose()
-    }
-    $sha256Hex = ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+    $sha256Hex = Get-FileSha256LowerHex -Path $zipPath
 
     $portableExeOutPath = ''
     $portableExeSha256 = ''

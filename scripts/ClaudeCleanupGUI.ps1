@@ -20,14 +20,8 @@ function Initialize-GuiUtf8Encoding {
 function Resolve-GuiLanguage {
     param([string]$Requested = $Language)
 
-    if ($Requested -eq 'zh-CN' -or $Requested -eq 'en-US') {
-        return $Requested
-    }
-    try {
-        if ([System.Globalization.CultureInfo]::CurrentUICulture.Name -like 'zh*') {
-            return 'zh-CN'
-        }
-    } catch {}
+    if ($Requested -in @('zh-CN', 'en-US')) { return $Requested }
+    try { if ([System.Globalization.CultureInfo]::CurrentUICulture.Name -like 'zh*') { return 'zh-CN' } } catch {}
     return 'en-US'
 }
 
@@ -282,15 +276,54 @@ $lblSubtitle.Size = New-Object System.Drawing.Size(760, 22)
 $lblSubtitle.ForeColor = [System.Drawing.Color]::FromArgb(203, 213, 225)
 $lblSubtitle.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 8.5)
 
-$btnLangToggle = New-Object System.Windows.Forms.Button
+function New-GuiCheckBox {
+    param([int]$Y)
+    $chk = New-Object System.Windows.Forms.CheckBox
+    $chk.Location = New-Object System.Drawing.Point(14, $Y)
+    $chk.Size = New-Object System.Drawing.Size(670, 22)
+    $chk.Checked = $true
+    return $chk
+}
+
+function New-GuiFlatButton {
+    param(
+        [int]$Width,
+        [int]$Height = 36,
+        [int[]]$Rgb = $null,
+        [bool]$Bold = $false
+    )
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Size = New-Object System.Drawing.Size($Width, $Height)
+    if ($null -ne $Rgb) {
+        $btn.BackColor = [System.Drawing.Color]::FromArgb($Rgb[0], $Rgb[1], $Rgb[2])
+        $btn.ForeColor = [System.Drawing.Color]::White
+        $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+        $btn.FlatAppearance.BorderSize = 0
+    }
+    if ($Bold) {
+        $btn.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9.5, [System.Drawing.FontStyle]::Bold)
+    }
+    return $btn
+}
+
+function Add-GuiResultRow {
+    param(
+        [string]$Category,
+        [string]$PathOrName,
+        [string]$StatusText,
+        [string]$DecisionText,
+        [string]$DetailsText
+    )
+    $lvi = New-Object System.Windows.Forms.ListViewItem($Category)
+    foreach ($sub in @($PathOrName, $StatusText, $DecisionText, $DetailsText)) {
+        [void]$lvi.SubItems.Add($sub)
+    }
+    [void]$lvResults.Items.Add($lvi)
+}
+
+$btnLangToggle = New-GuiFlatButton -Width 175 -Height 40 -Rgb @(37, 99, 235) -Bold $true
 $btnLangToggle.Location = New-Object System.Drawing.Point(810, 22)
-$btnLangToggle.Size = New-Object System.Drawing.Size(175, 40)
 $btnLangToggle.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
-$btnLangToggle.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
-$btnLangToggle.ForeColor = [System.Drawing.Color]::White
-$btnLangToggle.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnLangToggle.FlatAppearance.BorderSize = 0
-$btnLangToggle.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9.5, [System.Drawing.FontStyle]::Bold)
 
 $headerPanel.Controls.AddRange(@($lblTitle, $lblBadge, $lblSubtitle, $btnLangToggle))
 
@@ -300,30 +333,11 @@ $scopeGroup.Location = New-Object System.Drawing.Point(14, 106)
 $scopeGroup.Size = New-Object System.Drawing.Size(700, 160)
 $scopeGroup.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
-$chkCode = New-Object System.Windows.Forms.CheckBox
-$chkCode.Location = New-Object System.Drawing.Point(14, 22)
-$chkCode.Size = New-Object System.Drawing.Size(670, 22)
-$chkCode.Checked = $true
-
-$chkDesktop = New-Object System.Windows.Forms.CheckBox
-$chkDesktop.Location = New-Object System.Drawing.Point(14, 48)
-$chkDesktop.Size = New-Object System.Drawing.Size(670, 22)
-$chkDesktop.Checked = $true
-
-$chkVsCode = New-Object System.Windows.Forms.CheckBox
-$chkVsCode.Location = New-Object System.Drawing.Point(14, 74)
-$chkVsCode.Size = New-Object System.Drawing.Size(670, 22)
-$chkVsCode.Checked = $true
-
-$chkCred = New-Object System.Windows.Forms.CheckBox
-$chkCred.Location = New-Object System.Drawing.Point(14, 100)
-$chkCred.Size = New-Object System.Drawing.Size(670, 22)
-$chkCred.Checked = $true
-
-$chkEnv = New-Object System.Windows.Forms.CheckBox
-$chkEnv.Location = New-Object System.Drawing.Point(14, 126)
-$chkEnv.Size = New-Object System.Drawing.Size(670, 22)
-$chkEnv.Checked = $true
+$chkCode = New-GuiCheckBox -Y 22
+$chkDesktop = New-GuiCheckBox -Y 48
+$chkVsCode = New-GuiCheckBox -Y 74
+$chkCred = New-GuiCheckBox -Y 100
+$chkEnv = New-GuiCheckBox -Y 126
 
 $scopeGroup.Controls.AddRange(@($chkCode, $chkDesktop, $chkVsCode, $chkCred, $chkEnv))
 
@@ -350,40 +364,13 @@ $actionPanel.Location = New-Object System.Drawing.Point(14, 274)
 $actionPanel.Size = New-Object System.Drawing.Size(978, 44)
 $actionPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
-$btnScan = New-Object System.Windows.Forms.Button
-$btnScan.Size = New-Object System.Drawing.Size(175, 36)
-$btnScan.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
-$btnScan.ForeColor = [System.Drawing.Color]::White
-$btnScan.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnScan.FlatAppearance.BorderSize = 0
-
-$btnPlan = New-Object System.Windows.Forms.Button
-$btnPlan.Size = New-Object System.Drawing.Size(185, 36)
-$btnPlan.BackColor = [System.Drawing.Color]::FromArgb(15, 118, 110)
-$btnPlan.ForeColor = [System.Drawing.Color]::White
-$btnPlan.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnPlan.FlatAppearance.BorderSize = 0
-
-$btnClean = New-Object System.Windows.Forms.Button
-$btnClean.Size = New-Object System.Drawing.Size(205, 36)
-$btnClean.BackColor = [System.Drawing.Color]::FromArgb(185, 28, 28)
-$btnClean.ForeColor = [System.Drawing.Color]::White
-$btnClean.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnClean.FlatAppearance.BorderSize = 0
+$btnScan = New-GuiFlatButton -Width 175 -Rgb @(37, 99, 235)
+$btnPlan = New-GuiFlatButton -Width 185 -Rgb @(15, 118, 110)
+$btnClean = New-GuiFlatButton -Width 205 -Rgb @(185, 28, 28)
 $btnClean.Enabled = $false
-
-$btnVerify = New-Object System.Windows.Forms.Button
-$btnVerify.Size = New-Object System.Drawing.Size(165, 36)
-$btnVerify.BackColor = [System.Drawing.Color]::FromArgb(71, 85, 105)
-$btnVerify.ForeColor = [System.Drawing.Color]::White
-$btnVerify.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$btnVerify.FlatAppearance.BorderSize = 0
-
-$btnOpenAudit = New-Object System.Windows.Forms.Button
-$btnOpenAudit.Size = New-Object System.Drawing.Size(112, 36)
-
-$btnOpenPlan = New-Object System.Windows.Forms.Button
-$btnOpenPlan.Size = New-Object System.Drawing.Size(112, 36)
+$btnVerify = New-GuiFlatButton -Width 165 -Rgb @(71, 85, 105)
+$btnOpenAudit = New-GuiFlatButton -Width 112
+$btnOpenPlan = New-GuiFlatButton -Width 112
 
 $actionPanel.Controls.AddRange(@($btnScan, $btnPlan, $btnClean, $btnVerify, $btnOpenAudit, $btnOpenPlan))
 
@@ -490,31 +477,16 @@ function Populate-AuditListView {
                 continue
             }
             $rowStatus = if ($item.Decision -eq 'Ready') { $s.StatusFound } else { $s.StatusSkipped }
-            $lvi = New-Object System.Windows.Forms.ListViewItem([string]$item.Category)
-            $lvi.SubItems.Add([string]$item.Path) | Out-Null
-            $lvi.SubItems.Add($rowStatus) | Out-Null
-            $lvi.SubItems.Add([string]$item.Decision) | Out-Null
-            $lvi.SubItems.Add([string]$item.Reason) | Out-Null
-            $lvResults.Items.Add($lvi) | Out-Null
+            Add-GuiResultRow -Category ([string]$item.Category) -PathOrName ([string]$item.Path) -StatusText $rowStatus -DecisionText ([string]$item.Decision) -DetailsText ([string]$item.Reason)
         }
 
         if ($chkEnv.Checked -and $AuditReport.PSObject.Properties['Summary'] -and $AuditReport.Summary) {
             $envNames = @($AuditReport.Summary.EnvironmentVariableNames)
             if ($envNames.Count -eq 0) {
-                $lvi = New-Object System.Windows.Forms.ListViewItem('Environment Variables')
-                $lvi.SubItems.Add('CLAUDE_* / ANTHROPIC_*') | Out-Null
-                $lvi.SubItems.Add($s.StatusClean) | Out-Null
-                $lvi.SubItems.Add('ReadOnly') | Out-Null
-                $lvi.SubItems.Add('None detected') | Out-Null
-                $lvResults.Items.Add($lvi) | Out-Null
+                Add-GuiResultRow -Category 'Environment Variables' -PathOrName 'CLAUDE_* / ANTHROPIC_*' -StatusText $s.StatusClean -DecisionText 'ReadOnly' -DetailsText 'None detected'
             } else {
                 foreach ($ev in $envNames) {
-                    $lvi = New-Object System.Windows.Forms.ListViewItem("Env ($($ev.Scope))")
-                    $lvi.SubItems.Add([string]$ev.Name) | Out-Null
-                    $lvi.SubItems.Add($s.StatusFound) | Out-Null
-                    $lvi.SubItems.Add('ReadOnly') | Out-Null
-                    $lvi.SubItems.Add('Name reported only (secret values omitted)') | Out-Null
-                    $lvResults.Items.Add($lvi) | Out-Null
+                    Add-GuiResultRow -Category "Env ($($ev.Scope))" -PathOrName ([string]$ev.Name) -StatusText $s.StatusFound -DecisionText 'ReadOnly' -DetailsText 'Name reported only (secret values omitted)'
                 }
             }
         }
@@ -523,12 +495,7 @@ function Populate-AuditListView {
             $credLines = @($AuditReport.EnvironmentLines | Where-Object { $_ -match 'Credential Manager' })
             $credDetail = if ($credLines.Count -gt 0) { [string]$credLines[0] } else { 'Audited (count only)' }
             $credStatus = if ($credDetail -match 'count:\s*0\b') { $s.StatusClean } else { $s.StatusFound }
-            $lvi = New-Object System.Windows.Forms.ListViewItem('Credential Manager')
-            $lvi.SubItems.Add('Claude* generic targets') | Out-Null
-            $lvi.SubItems.Add($credStatus) | Out-Null
-            $lvi.SubItems.Add('ReadOnly') | Out-Null
-            $lvi.SubItems.Add($credDetail) | Out-Null
-            $lvResults.Items.Add($lvi) | Out-Null
+            Add-GuiResultRow -Category 'Credential Manager' -PathOrName 'Claude* generic targets' -StatusText $credStatus -DecisionText 'ReadOnly' -DetailsText $credDetail
         }
     } finally {
         $lvResults.EndUpdate()
@@ -552,53 +519,63 @@ function Invoke-ToggleGuiLanguage {
     }
 }
 
+function Invoke-GuiBusyAction {
+    param(
+        [string]$ErrorTitle = '',
+        [Parameter(Mandatory = $true)][scriptblock]$Action
+    )
+    Set-BusyState -Busy $true
+    try {
+        & $Action
+    } catch {
+        Append-GuiLog ('[ERROR] ' + $_.Exception.Message)
+        if (-not [string]::IsNullOrEmpty($ErrorTitle)) {
+            [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, $ErrorTitle, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+        }
+    } finally {
+        Set-BusyState -Busy $false
+    }
+}
+
+function Invoke-GuiBackendJsonStep {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$BackendArgs,
+        [Parameter(Mandatory = $true)][string]$StepLabel
+    )
+    $res = Invoke-GuiBackendCommand -BackendPath $backendPath -Arguments $BackendArgs -PumpEvents
+    if ($res.ExitCode -ne 0) {
+        throw ("$StepLabel failed (exit=$($res.ExitCode)): $($res.StdErr)")
+    }
+    return (ConvertFrom-BackendJsonOutput -Text $res.StdOut)
+}
+
 $btnLangToggle.Add_Click({ Invoke-ToggleGuiLanguage })
 
 $btnScan.Add_Click({
     $s = Get-GuiStrings -Lang $state.Language
-    Set-BusyState -Busy $true
-    try {
+    Invoke-GuiBusyAction -ErrorTitle 'Audit Error' -Action {
         Append-GuiLog "Running read-only Audit (-Language $($state.Language))..."
-        $res = Invoke-GuiBackendCommand -BackendPath $backendPath -Arguments @('-Audit', '-Language', $state.Language, '-OutputFormat', 'Json') -PumpEvents
-        if ($res.ExitCode -ne 0) {
-            throw ("Audit failed (exit=$($res.ExitCode)): $($res.StdErr)")
-        }
-        $auditObj = ConvertFrom-BackendJsonOutput -Text $res.StdOut
+        $auditObj = Invoke-GuiBackendJsonStep -BackendArgs @('-Audit', '-Language', $state.Language, '-OutputFormat', 'Json') -StepLabel 'Audit'
         $state.LastAuditReport = $auditObj
         $state.HasScanned = $true
         Populate-AuditListView -AuditReport $auditObj
         $invCount = @($auditObj.Inventory).Count
         $statusLabel.Text = ($s.ReadyStatusScanned -f $invCount)
         Append-GuiLog ("Audit complete: {0} inventory item(s)." -f $invCount)
-    } catch {
-        Append-GuiLog ("[ERROR] " + $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Audit Error', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-    } finally {
-        Set-BusyState -Busy $false
     }
 })
 
 $btnPlan.Add_Click({
     $s = Get-GuiStrings -Lang $state.Language
-    Set-BusyState -Busy $true
-    try {
+    Invoke-GuiBusyAction -ErrorTitle 'Plan Error' -Action {
         Append-GuiLog "Generating SchemaVersion=3 plan (-Language $($state.Language))..."
-        $res = Invoke-GuiBackendCommand -BackendPath $backendPath -Arguments @('-Plan', '-Language', $state.Language, '-OutputFormat', 'Json') -PumpEvents
-        if ($res.ExitCode -ne 0) {
-            throw ("Plan failed (exit=$($res.ExitCode)): $($res.StdErr)")
-        }
-        $planObj = ConvertFrom-BackendJsonOutput -Text $res.StdOut
+        $planObj = Invoke-GuiBackendJsonStep -BackendArgs @('-Plan', '-Language', $state.Language, '-OutputFormat', 'Json') -StepLabel 'Plan'
         $state.HasPlan = $true
         $state.PlanSha256 = [string]$planObj.Sha256
         $state.ReadyTargetCount = [int]$planObj.Ready
         $shortSha = if ($state.PlanSha256.Length -ge 12) { $state.PlanSha256.Substring(0, 12) } else { $state.PlanSha256 }
         $statusLabel.Text = ($s.ReadyStatusPlanned -f $planObj.Ready, $shortSha)
         Append-GuiLog ("Plan written: $($planObj.PlanPath) | SHA256=$($state.PlanSha256) | Ready=$($planObj.Ready)")
-    } catch {
-        Append-GuiLog ("[ERROR] " + $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Plan Error', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-    } finally {
-        Set-BusyState -Busy $false
     }
 })
 
@@ -613,14 +590,9 @@ $btnClean.Add_Click({
         return
     }
 
-    Set-BusyState -Busy $true
-    try {
-        Append-GuiLog "Running mandatory -WhatIf preview before confirmation..."
-        $whatIfRes = Invoke-GuiBackendCommand -BackendPath $backendPath -Arguments @('-Apply', '-Policy', $selectedPolicy, '-ApprovedManifestSha256', $state.PlanSha256, '-Language', $state.Language, '-OutputFormat', 'Json', '-WhatIf') -PumpEvents
-        if ($whatIfRes.ExitCode -ne 0) {
-            throw ("WhatIf preview failed: $($whatIfRes.StdErr)")
-        }
-        $previewObj = ConvertFrom-BackendJsonOutput -Text $whatIfRes.StdOut
+    Invoke-GuiBusyAction -ErrorTitle 'Cleanup Error' -Action {
+        Append-GuiLog 'Running mandatory -WhatIf preview before confirmation...'
+        $previewObj = Invoke-GuiBackendJsonStep -BackendArgs @('-Apply', '-Policy', $selectedPolicy, '-ApprovedManifestSha256', $state.PlanSha256, '-Language', $state.Language, '-OutputFormat', 'Json', '-WhatIf') -StepLabel 'WhatIf preview'
         $readyPreview = @($previewObj.Results | Where-Object { $_.Status -eq 'PreviewOnly' })
         if ($readyPreview.Count -eq 0) {
             [System.Windows.Forms.MessageBox]::Show($s.NoReadyTargets, $s.ConfirmTitle, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
@@ -648,63 +620,36 @@ $btnClean.Add_Click({
         }
 
         Append-GuiLog "User explicitly approved SHA256=$($state.PlanSha256). Executing ClaudeCleanup.ps1 -Apply..."
-        $applyRes = Invoke-GuiBackendCommand -BackendPath $backendPath -Arguments @('-Apply', '-Policy', $selectedPolicy, '-ApprovedManifestSha256', $state.PlanSha256, '-Language', $state.Language, '-OutputFormat', 'Json', '-Confirm:$false') -PumpEvents
-        if ($applyRes.ExitCode -ne 0) {
-            throw ("Apply exited $($applyRes.ExitCode): $($applyRes.StdErr)")
-        }
-        $applyObj = ConvertFrom-BackendJsonOutput -Text $applyRes.StdOut
+        $applyObj = Invoke-GuiBackendJsonStep -BackendArgs @('-Apply', '-Policy', $selectedPolicy, '-ApprovedManifestSha256', $state.PlanSha256, '-Language', $state.Language, '-OutputFormat', 'Json', '-Confirm:$false') -StepLabel 'Apply'
         $state.HasPlan = $false
         $state.ReadyTargetCount = 0
         Append-GuiLog ($s.CleanSuccess -f $applyObj.Outcome)
         $statusLabel.Text = ($s.CleanSuccess -f $applyObj.Outcome)
         $btnVerify.PerformClick()
-    } catch {
-        Append-GuiLog ("[ERROR] " + $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Cleanup Error', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-    } finally {
-        Set-BusyState -Busy $false
     }
 })
 
 $btnVerify.Add_Click({
     $s = Get-GuiStrings -Lang $state.Language
-    Set-BusyState -Busy $true
-    try {
+    Invoke-GuiBusyAction -ErrorTitle 'Verify Error' -Action {
         Append-GuiLog "Running Verify (-Language $($state.Language))..."
-        $res = Invoke-GuiBackendCommand -BackendPath $backendPath -Arguments @('-Verify', '-Language', $state.Language, '-OutputFormat', 'Json') -PumpEvents
-        if ($res.ExitCode -ne 0) {
-            throw ("Verify failed (exit=$($res.ExitCode)): $($res.StdErr)")
-        }
-        $verObj = ConvertFrom-BackendJsonOutput -Text $res.StdOut
+        $verObj = Invoke-GuiBackendJsonStep -BackendArgs @('-Verify', '-Language', $state.Language, '-OutputFormat', 'Json') -StepLabel 'Verify'
         $state.LastVerifyReport = $verObj
         $planCount = @($verObj.Verify.PlanChecks).Count
         $curCount = @($verObj.Verify.CurrentInventory).Count
         $statusLabel.Text = ($s.VerifyDone -f $planCount, $curCount)
         Append-GuiLog ($s.VerifyDone -f $planCount, $curCount)
-    } catch {
-        Append-GuiLog ("[ERROR] " + $_.Exception.Message)
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Verify Error', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
-    } finally {
-        Set-BusyState -Busy $false
     }
 })
 
 $btnOpenAudit.Add_Click({
-    Set-BusyState -Busy $true
-    try {
-        $res = Invoke-GuiBackendCommand -BackendPath $backendPath -Arguments @('-Audit', '-Language', $state.Language, '-SaveAuditReport', '-OutputFormat', 'Json') -PumpEvents
-        if ($res.ExitCode -ne 0) {
-            throw ("Failed to export AUDIT.md: $($res.StdErr)")
-        }
+    Invoke-GuiBusyAction -Action {
+        $null = Invoke-GuiBackendJsonStep -BackendArgs @('-Audit', '-Language', $state.Language, '-SaveAuditReport', '-OutputFormat', 'Json') -StepLabel 'Export AUDIT.md'
         $auditFile = Join-Path $resolvedRoot 'AUDIT.md'
         if (Test-Path -LiteralPath $auditFile -PathType Leaf) {
             Append-GuiLog "Exported AUDIT.md ($($state.Language)): $auditFile"
             Start-Process -FilePath $auditFile | Out-Null
         }
-    } catch {
-        Append-GuiLog ("[ERROR] " + $_.Exception.Message)
-    } finally {
-        Set-BusyState -Busy $false
     }
 })
 

@@ -7,37 +7,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-function Resolve-CallerPath {
-    param([Parameter(Mandatory = $true)][string]$PathValue)
-
-    $raw = $PathValue.Trim()
-    if (-not [System.IO.Path]::IsPathRooted($raw)) {
-        $raw = Join-Path (Get-Location).Path $raw
-    }
-    return [System.IO.Path]::GetFullPath($raw)
-}
-
-function Invoke-DesktopCapture {
-    param(
-        [Parameter(Mandatory = $true)][string]$ExecutablePath,
-        [Parameter(Mandatory = $true)][string]$ArgumentsLine
-    )
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $ExecutablePath
-    $psi.Arguments = $ArgumentsLine
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    if ($null -eq $proc) {
-        throw "Failed to start desktop executable: $ExecutablePath"
-    }
-    $proc.WaitForExit()
-    if ($proc.ExitCode -ne 0) {
-        throw "Desktop capture failed with exit code $($proc.ExitCode) for args: $ArgumentsLine"
-    }
-}
+. (Join-Path $PSScriptRoot 'Common-BuildHelpers.ps1')
 
 function New-RoundedRectPath {
     param(
@@ -403,23 +373,8 @@ Add-Type -AssemblyName WindowsBase
 $bitmapsToDispose = New-Object 'System.Collections.Generic.List[System.Drawing.Bitmap]'
 
 try {
-    $resolvedExe = ''
-    if (-not [string]::IsNullOrWhiteSpace($ExePath)) {
-        $resolvedExe = Resolve-CallerPath -PathValue $ExePath
-        if (-not (Test-Path -LiteralPath $resolvedExe -PathType Leaf)) {
-            throw "Specified ExePath does not exist: $resolvedExe"
-        }
-        $exeItem = Get-Item -LiteralPath $resolvedExe -Force
-        if (($exeItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw "Refusing to execute reparse point ExePath: $resolvedExe"
-        }
-    } else {
-        $resolvedExe = Join-Path $workDir 'Claude-Residual-ID-Cleaner.exe'
-        $buildRes = & $buildScript -SourceDir (Join-Path $repoRoot 'src\Gui') -OutputPath $resolvedExe
-        if ($null -eq $buildRes -or -not $buildRes.Succeeded -or -not (Test-Path -LiteralPath $resolvedExe -PathType Leaf)) {
-            throw "Temporary desktop build failed at: $resolvedExe"
-        }
-    }
+    $exeInfo = Resolve-CaptureDesktopExecutable -RepoRoot $repoRoot -ExePath $ExePath -SandboxWorkDir $workDir
+    $resolvedExe = $exeInfo.ExePath
 
     $png1 = Join-Path $workDir 'step1-idle.png'
     $png2 = Join-Path $workDir 'step2-scan.png'
@@ -436,64 +391,37 @@ try {
     }
     Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-verified --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png4`""
 
-    $bmp1 = New-Object System.Drawing.Bitmap($png1)
-    $bmp2 = New-Object System.Drawing.Bitmap($png2)
-    $bmp3 = New-Object System.Drawing.Bitmap($png3)
-    $bmp4 = New-Object System.Drawing.Bitmap($png4)
-    $bitmapsToDispose.Add($bmp1)
-    $bitmapsToDispose.Add($bmp2)
-    $bitmapsToDispose.Add($bmp3)
-    $bitmapsToDispose.Add($bmp4)
+    $stepBmps = @(
+        (New-Object System.Drawing.Bitmap($png1)),
+        (New-Object System.Drawing.Bitmap($png2)),
+        (New-Object System.Drawing.Bitmap($png3)),
+        (New-Object System.Drawing.Bitmap($png4))
+    )
+    foreach ($sb in $stepBmps) { $bitmapsToDispose.Add($sb) }
 
     $targetWidth = 1120
     $targetHeight = 790
     $stepLabels = @('1. 扫描面板', '2. 识别残余', '3. 实时清理', '4. 核验清零')
-    $cap1 = '启动只读扫描面板 · 默认零写入、绝不改动 Windows 系统'
-    $cap2 = '精准识别残余账号 UUID 与可清理缓存 · 严守安全红线'
-    $cap3 = '实时流式清理进度 · 逐项状态徽章即时更新'
-    $cap4 = '独立核验清零完成 · 剩余可清理残留：0 项'
+    $stepCaptions = @(
+        '启动只读扫描面板 · 默认零写入、绝不改动 Windows 系统',
+        '精准识别残余账号 UUID 与可清理缓存 · 严守安全红线',
+        '实时流式清理进度 · 逐项状态徽章即时更新',
+        '独立核验清零完成 · 剩余可清理残留：0 项'
+    )
+    $holdDelays = @(160, 180, 180, 200)
 
     $gifFrames = New-Object 'System.Collections.Generic.List[System.Drawing.Bitmap]'
     $gifDelays = New-Object 'System.Collections.Generic.List[int]'
 
-    # Step 1 hold (1.6s)
-    $f1 = New-StepFrameBitmap -BaseA $bmp1 -ActiveStepIndex 0 -Caption $cap1 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-    $bitmapsToDispose.Add($f1); [void]$gifFrames.Add($f1); [void]$gifDelays.Add(160)
+    for ($sIdx = 0; $sIdx -lt $stepBmps.Count; $sIdx++) {
+        $nextIdx = ($sIdx + 1) % $stepBmps.Count
+        $holdBmp = New-StepFrameBitmap -BaseA $stepBmps[$sIdx] -ActiveStepIndex $sIdx -Caption $stepCaptions[$sIdx] -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
+        $bitmapsToDispose.Add($holdBmp); [void]$gifFrames.Add($holdBmp); [void]$gifDelays.Add($holdDelays[$sIdx])
 
-    # Smooth transition 1 -> 2
-    foreach ($alpha in @(0.30, 0.65)) {
-        $ft = New-StepFrameBitmap -BaseA $bmp1 -BaseB $bmp2 -BlendAlpha $alpha -ActiveStepIndex 1 -Caption $cap2 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-        $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
-    }
-
-    # Step 2 hold (1.8s)
-    $f2 = New-StepFrameBitmap -BaseA $bmp2 -ActiveStepIndex 1 -Caption $cap2 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-    $bitmapsToDispose.Add($f2); [void]$gifFrames.Add($f2); [void]$gifDelays.Add(180)
-
-    # Smooth transition 2 -> 3
-    foreach ($alpha in @(0.30, 0.65)) {
-        $ft = New-StepFrameBitmap -BaseA $bmp2 -BaseB $bmp3 -BlendAlpha $alpha -ActiveStepIndex 2 -Caption $cap3 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-        $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
-    }
-
-    # Step 3 hold (1.8s)
-    $f3 = New-StepFrameBitmap -BaseA $bmp3 -ActiveStepIndex 2 -Caption $cap3 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-    $bitmapsToDispose.Add($f3); [void]$gifFrames.Add($f3); [void]$gifDelays.Add(180)
-
-    # Smooth transition 3 -> 4
-    foreach ($alpha in @(0.30, 0.65)) {
-        $ft = New-StepFrameBitmap -BaseA $bmp3 -BaseB $bmp4 -BlendAlpha $alpha -ActiveStepIndex 3 -Caption $cap4 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-        $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
-    }
-
-    # Step 4 hold (2.0s)
-    $f4 = New-StepFrameBitmap -BaseA $bmp4 -ActiveStepIndex 3 -Caption $cap4 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-    $bitmapsToDispose.Add($f4); [void]$gifFrames.Add($f4); [void]$gifDelays.Add(200)
-
-    # Smooth transition 4 -> 1 for clean loop
-    foreach ($alpha in @(0.30, 0.65)) {
-        $ft = New-StepFrameBitmap -BaseA $bmp4 -BaseB $bmp1 -BlendAlpha $alpha -ActiveStepIndex 0 -Caption $cap1 -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
-        $bitmapsToDispose.Add($ft); [void]$gifFrames.Add($ft); [void]$gifDelays.Add(8)
+        foreach ($alpha in @(0.30, 0.65)) {
+            $fadeBmp = New-StepFrameBitmap -BaseA $stepBmps[$sIdx] -BaseB $stepBmps[$nextIdx] -BlendAlpha $alpha -ActiveStepIndex $nextIdx -Caption $stepCaptions[$nextIdx] -StepLabels $stepLabels -TargetWidth $targetWidth -TargetHeight $targetHeight
+            $bitmapsToDispose.Add($fadeBmp); [void]$gifFrames.Add($fadeBmp); [void]$gifDelays.Add(8)
+        }
     }
 
     Write-AnimatedGifFile -Frames @($gifFrames.ToArray()) -DelaysCentiseconds @($gifDelays.ToArray()) -DestinationPath $resolvedOutput
@@ -519,21 +447,5 @@ try {
             try { $b.Dispose() } catch {}
         }
     }
-    if (Test-Path -LiteralPath $workDir) {
-        try {
-            Remove-Item -LiteralPath $workDir -Recurse -Force
-        } catch {
-            Write-Warning "Failed to remove temporary demo-gif directory '$workDir': $($_.Exception.Message)"
-        }
-    }
-    if (-not $sandboxExisted -and (Test-Path -LiteralPath $sandboxRoot)) {
-        $remaining = @(Get-ChildItem -LiteralPath $sandboxRoot -Force)
-        if ($remaining.Count -eq 0) {
-            try {
-                [System.IO.Directory]::Delete($sandboxRoot, $false)
-            } catch {
-                Write-Warning "Empty sandbox root retained: $sandboxRoot ($($_.Exception.Message))"
-            }
-        }
-    }
+    Remove-CaptureSandboxDirectory -WorkDir $workDir -SandboxRoot $sandboxRoot -SandboxExisted $sandboxExisted
 }
