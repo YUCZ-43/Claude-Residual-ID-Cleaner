@@ -494,14 +494,18 @@ jobs:
             if (Test-Path -LiteralPath $installedPs1) {
               Remove-Item -LiteralPath $installedPs1 -Force
             }
-            $pSmoke = [System.Diagnostics.Process]::Start($installedExe, "--smoke-ui --self-test `"$installedSmokeJson`"")
+            $psiSmoke = [System.Diagnostics.ProcessStartInfo]::new($installedExe, "--smoke-ui --self-test `"$installedSmokeJson`"")
+            $psiSmoke.WorkingDirectory = $setupInstallRoot
+            $psiSmoke.UseShellExecute = $false
+            $psiSmoke.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $setupSmokeDir 'localappdata'
+            $pSmoke = [System.Diagnostics.Process]::Start($psiSmoke)
             $pSmoke.WaitForExit()
             if ($pSmoke.ExitCode -ne 0) {
               throw "Installed .exe standalone fallback --smoke-ui exited $($pSmoke.ExitCode)"
             }
             $installedRep = [IO.File]::ReadAllText($installedSmokeJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
             if (-not $installedRep.BackendFound -or -not $installedRep.UsedEmbeddedEngine) {
-              throw 'Installed .exe failed embedded engine fallback when adjacent .ps1 was absent.'
+              throw "Installed .exe failed embedded engine fallback when adjacent .ps1 was absent (CoreScriptPath=$($installedRep.CoreScriptPath))."
             }
             Write-Host "RELEASE_SETUP_OK: Built $($setupBuild.SizeBytes) bytes, SHA256=$($setupBuild.Sha256), installed fallback verified."
           } finally {
