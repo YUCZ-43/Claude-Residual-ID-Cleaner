@@ -566,7 +566,14 @@ try {
     $aclOk = Get-PathAclDiagnostics -Path $allowed
     $aclAbsent = Get-PathAclDiagnostics -Path (Join-Path $sandbox 'no-such-acl-dir')
     $aclBad = Get-PathAclDiagnostics -Path '\\?\C:\invalid'
-    Assert-True ($aclOk.Status -eq 'Ok' -and $aclOk.IsCurrentUserOwner -and (-not $aclOk.IsBuiltinAdminOwned) -and $aclAbsent.Status -eq 'Absent' -and $aclBad.Status -eq 'AccessDenied') 'read-only ACL diagnostics classify Ok, Absent, and AccessDenied'
+    $curId = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $elevatedAdminOwned = ($null -ne $curId.Owner -and $curId.Owner.Value.Equals('S-1-5-32-544', [StringComparison]::OrdinalIgnoreCase))
+    $aclOkExpected = if ($elevatedAdminOwned) {
+        ($aclOk.Status -eq 'AdminOwned' -and $aclOk.IsBuiltinAdminOwned)
+    } else {
+        ($aclOk.Status -eq 'Ok' -and $aclOk.IsCurrentUserOwner -and (-not $aclOk.IsBuiltinAdminOwned))
+    }
+    Assert-True ($aclOkExpected -and $aclAbsent.Status -eq 'Absent' -and $aclBad.Status -eq 'AccessDenied') 'read-only ACL diagnostics classify Ok/AdminOwned, Absent, and AccessDenied'
 
     if ($junctionCreated) {
         $aclJunc = Join-Path $sandbox 'acl-junction'
