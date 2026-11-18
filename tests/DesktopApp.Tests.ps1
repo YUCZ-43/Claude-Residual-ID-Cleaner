@@ -41,20 +41,28 @@ function Assert-True {
     Write-Output "PASS: $Name"
 }
 
-function Get-PeSubsystemType {
+function Get-PeHeaderInfo {
     param([Parameter(Mandatory = $true)][string]$ExePath)
 
     $bytes = [System.IO.File]::ReadAllBytes($ExePath)
     if ($bytes.Length -lt 256 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
-        return -1
+        return [pscustomobject]@{ Machine = -1; Subsystem = -1 }
     }
     $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
     if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45) {
-        return -1
+        return [pscustomobject]@{ Machine = -1; Subsystem = -1 }
     }
+    $machine = [int][BitConverter]::ToUInt16($bytes, $peOffset + 4)
     $optHeaderStart = $peOffset + 24
     # PE OptionalHeader Subsystem offset: +68 bytes for both PE32 (0x10B) and PE32+ (0x20B)
-    return [int][BitConverter]::ToUInt16($bytes, $optHeaderStart + 68)
+    $subsystem = [int][BitConverter]::ToUInt16($bytes, $optHeaderStart + 68)
+    return [pscustomobject]@{ Machine = $machine; Subsystem = $subsystem }
+}
+
+function Get-PeSubsystemType {
+    param([Parameter(Mandatory = $true)][string]$ExePath)
+
+    return (Get-PeHeaderInfo -ExePath $ExePath).Subsystem
 }
 
 try {
@@ -337,6 +345,30 @@ try {
         (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall Claude Residual ID Cleaner.lnk') -PathType Leaf)
     ) 'Compiled Setup .exe completes sandboxed install with rebranded ARP metadata, payload, shortcuts, manifest, and zero live registry writes'
 
+    # 9b. Delete installed ClaudeCleanup.ps1 and verify installed .exe still succeeds via embedded engine fallback (--smoke-ui)
+    $installedExe = Join-Path $setupInstallTarget 'Claude-Residual-ID-Cleaner.exe'
+    $installedPs1 = Join-Path $setupInstallTarget 'ClaudeCleanup.ps1'
+    $installedLocalAppData = Join-Path $appSandbox 'installed-fallback-localappdata'
+    $installedSmokeOut = Join-Path $appSandbox 'installed-fallback-smoke.json'
+    Remove-Item -LiteralPath $installedPs1 -Force
+    $psiInstalledFallback = New-Object System.Diagnostics.ProcessStartInfo
+    $psiInstalledFallback.FileName = $installedExe
+    $psiInstalledFallback.Arguments = "--smoke-ui --self-test `"$installedSmokeOut`""
+    $psiInstalledFallback.WorkingDirectory = $setupInstallTarget
+    $psiInstalledFallback.UseShellExecute = $false
+    $psiInstalledFallback.EnvironmentVariables['LOCALAPPDATA'] = $installedLocalAppData
+    $pInstalledFallback = [System.Diagnostics.Process]::Start($psiInstalledFallback)
+    $pInstalledFallback.WaitForExit()
+    $jInstalledFallback = [IO.File]::ReadAllText($installedSmokeOut, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-True (
+        $pInstalledFallback.ExitCode -eq 0 -and
+        $jInstalledFallback.AppInstantiated -and
+        $jInstalledFallback.BackendFound -and
+        $jInstalledFallback.UsedEmbeddedEngine -and
+        $jInstalledFallback.HasEmbeddedCoreScriptResource -and
+        (Test-Path -LiteralPath $jInstalledFallback.CoreScriptPath -PathType Leaf)
+    ) 'Installed Setup .exe works standalone via embedded engine extraction (--smoke-ui) even when adjacent ClaudeCleanup.ps1 is absent'
+
     $psiSetupUninst = New-Object System.Diagnostics.ProcessStartInfo
     $psiSetupUninst.FileName = $sandboxSetupExe
     $psiSetupUninst.Arguments = "--headless --uninstall --no-registry --install-dir `"$setupInstallTarget`" --self-test `"$setupUninstOut`""
@@ -348,7 +380,7 @@ try {
     Assert-True (
         $pSetupUninst.ExitCode -eq 0 -and
         $jSetupUninst.Succeeded -and
-        $jSetupUninst.RemovedFileCount -ge 40 -and
+        $jSetupUninst.RemovedFileCount -ge 39 -and
         (-not (Test-Path -LiteralPath $setupInstallTarget)) -and
         (-not (Test-Path -LiteralPath (Join-Path $setupDesktopDir 'Claude Residual ID Cleaner.lnk'))) -and
         (-not (Test-Path -LiteralPath (Join-Path $setupStartMenuDir 'Uninstall Claude Residual ID Cleaner.lnk')))
@@ -473,6 +505,54 @@ try {
         ($execRptMd -match '已彻底清除') -and
         ($execRptMd -match 'chrome-native-host\.log')
     ) 'ClassifyNonReadyToneAndLabel never labels Claude parent folders OS Protected and BuildExecutionReportData computes cleaned, freed MB, and locked summaries accurately'
+
+    # 11. Isolated empty-directory execution (--smoke-ui) verifies SHA-256 embedded extraction + native ARM64 (0xAA64) compilation
+    $isolatedDir = Join-Path $appSandbox 'isolated-portable-empty'
+    New-Item -ItemType Directory -Path $isolatedDir -Force | Out-Null
+    $isolatedPortableExe = Join-Path $isolatedDir 'RenamedCleanerPortable.exe'
+    [IO.File]::Copy($sandboxExe, $isolatedPortableExe, $true)
+    $isolatedLocalAppData = Join-Path $appSandbox 'isolated-localappdata'
+    $isolatedSmokeOut = Join-Path $appSandbox 'isolated-smoke.json'
+
+    $psiIsolated = New-Object System.Diagnostics.ProcessStartInfo
+    $psiIsolated.FileName = $isolatedPortableExe
+    $psiIsolated.Arguments = "--smoke-ui --self-test `"$isolatedSmokeOut`""
+    $psiIsolated.WorkingDirectory = $isolatedDir
+    $psiIsolated.UseShellExecute = $false
+    $psiIsolated.EnvironmentVariables['LOCALAPPDATA'] = $isolatedLocalAppData
+    $pIsolated = [System.Diagnostics.Process]::Start($psiIsolated)
+    $pIsolated.WaitForExit()
+    $jIsolated = [IO.File]::ReadAllText($isolatedSmokeOut, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+
+    $repoCoreHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'ClaudeCleanup.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $extractedCoreHash = (Get-FileHash -LiteralPath $jIsolated.CoreScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $expectedEngineSubpath = Join-Path (Join-Path (Join-Path $isolatedLocalAppData 'Claude-Residual-ID-Cleaner') 'engine') ($repoCoreHash.Substring(0, 16) + '\ClaudeCleanup.ps1')
+
+    Assert-True (
+        $pIsolated.ExitCode -eq 0 -and
+        $jIsolated.AppInstantiated -and
+        $jIsolated.BackendFound -and
+        $jIsolated.UsedEmbeddedEngine -and
+        $jIsolated.HasEmbeddedCoreScriptResource -and
+        ($extractedCoreHash -eq $repoCoreHash) -and
+        ($jIsolated.CoreScriptPath -eq $expectedEngineSubpath)
+    ) 'Portable .exe launched from an empty folder extracts & verifies embedded ClaudeCleanup.ps1 SHA-256 into LOCALAPPDATA engine cache (--smoke-ui)'
+
+    $arm64ExeOut = Join-Path $appSandbox 'Claude-Residual-ID-Cleaner-arm64.exe'
+    $arm64SetupOut = Join-Path $appSandbox 'Claude-Residual-ID-Cleaner-arm64-setup.exe'
+    $arm64ExeRes = & $buildScript -SourceDir (Join-Path $repoRoot 'src\Gui') -OutputPath $arm64ExeOut -Platform 'arm64'
+    $arm64SetupRes = & $installerBuildScript -SourceDir (Join-Path $repoRoot 'src\Installer') -GuiSourceDir (Join-Path $repoRoot 'src\Gui') -OutputPath $arm64SetupOut -DesktopExePath $arm64ExeOut -Version '0.1.0' -Platform 'arm64'
+    $arm64ExePe = Get-PeHeaderInfo -ExePath $arm64ExeOut
+    $arm64SetupPe = Get-PeHeaderInfo -ExePath $arm64SetupOut
+    Assert-True (
+        $arm64ExeRes.Succeeded -and
+        $arm64ExeRes.EmbeddedEngine -and
+        $arm64ExePe.Machine -eq 0xAA64 -and
+        $arm64ExePe.Subsystem -eq 2 -and
+        $arm64SetupRes.Succeeded -and
+        $arm64SetupPe.Machine -eq 0xAA64 -and
+        $arm64SetupPe.Subsystem -eq 2
+    ) 'Build-DesktopApp.ps1 and Build-Installer.ps1 compile native Windows ARM64 (PE Machine 0xAA64, GUI Subsystem 2) executables cleanly'
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; $($failedList.Count) failed"
     if ($failedList.Count -gt 0) { exit 1 }

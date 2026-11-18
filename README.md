@@ -7,7 +7,7 @@
   <p>专为 Windows 用户打造的 Claude 封号残余账号 ID、认证凭据与会话缓存清理工具 — 独立桌面软件 + AI 技能双驱动，默认只读体检，绝不改动 Windows 系统本身</p>
   <p>
     <a href="https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest"><img src="https://img.shields.io/badge/Release-v0.1.0-3B82F6?style=flat-square" alt="Release v0.1.0" /></a>
-    <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078D4?style=flat-square" alt="Platform Windows 10/11 x64" />
+    <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64%20%7C%20ARM64-0078D4?style=flat-square" alt="Platform Windows 10/11 x64 | ARM64" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22C55E?style=flat-square" alt="License MIT" /></a>
     <a href="README.en.md"><img src="https://img.shields.io/badge/Language-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%7C%20English-16A34A?style=flat-square" alt="Language" /></a>
   </p>
@@ -56,14 +56,17 @@
 
 ## 快速下载与校验（GitHub Releases）
 
-前往 [GitHub Releases 最新版本](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) 获取标准 `v0.1.0` (`x64`) 发布产物：
+前往 [GitHub Releases 最新版本](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) 获取标准 `v0.1.0`（支持 **Windows x64** 与 **Windows ARM64**）发布产物。**单文件便携版（`portable.exe`）与安装向导版（`setup.exe`）均内置完整 [ClaudeCleanup.ps1](ClaudeCleanup.ps1) 核心引擎**：即使将 `portable.exe` 单独复制到空白目录运行，程序也会自动在 `%LOCALAPPDATA%\Claude-Residual-ID-Cleaner\engine\<sha256-16>\` 校验 SHA-256 并安全释放后端引擎，无需额外拷贝脚本。
 
-| 发布产物文件名 | 适用场景 | 安装位置与权限 | 下载链接 |
-| :--- | :--- | :--- | :--- |
-| **`Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe`** | **标准安装向导版（推荐普通用户）**：自动创建桌面与开始菜单快捷方式，支持 Windows“应用和功能”干净卸载 | 默认安装至 `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner`（**标准用户免 UAC**） | [下载 Setup 安装包](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
-| **`Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe`** | **绿色单文件版（推荐便携运行）**：免安装、零 Add/Remove 注册表写入，双击即用 | 任意本地目录（需同目录或上级目录含核心脚本，或配合完整压缩包使用） | [下载绿色单文件版](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
-| **`Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip`** | **完整便携包**：内含 `Claude-Residual-ID-Cleaner.exe`、全部 PowerShell 后端脚本、`skills/` 及文档 | 解压即用，支持完整桌面端、CLI 与跨代理 Skill | [下载完整压缩包](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
-| **`SHA256SUMS.txt`** | **完整性校验清单**：包含上述所有 x64 发布产物的 64 位 SHA-256 哈希 | 下载后使用 PowerShell `Get-FileHash -Algorithm SHA256` 对照核验 | [查看校验文件](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| 发布产物文件名 | 架构 | 适用场景 | 安装位置与权限 | 下载链接 |
+| :--- | :--- | :--- | :--- | :--- |
+| **`Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe`** | Windows x64 | **标准安装向导版（推荐桌面用户）**：自动创建快捷方式，支持 Windows“应用和功能”干净卸载 | 默认安装至 `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner`（**标准用户免 UAC**） | [下载 x64 Setup](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe`** | Windows x64 | **100% 独立绿色单文件版**：内嵌后端核心引擎，免安装、零注册表写入，任意空目录双击即用 | 自动在 `%LOCALAPPDATA%\Claude-Residual-ID-Cleaner\engine\` 校验并运行引擎 | [下载 x64 Portable](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-arm64-setup.exe`** | Windows ARM64 | **ARM64 原生安装向导版**：面向骁龙 / Windows on ARM64 设备（原生 PE `0xAA64`） | 默认安装至 `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner`（**标准用户免 UAC**） | [下载 ARM64 Setup](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-arm64-portable.exe`** | Windows ARM64 | **ARM64 原生独立绿色单文件版**：内嵌后端引擎，面向 ARM64 设备（原生 PE `0xAA64`） | 自动在 `%LOCALAPPDATA%\Claude-Residual-ID-Cleaner\engine\` 校验并运行引擎 | [下载 ARM64 Portable](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip`** | Windows x64 | **完整便携包**：内含 `x64` 桌面程序、全部 PowerShell 脚本、`skills/` 及文档 | 解压即用，支持完整桌面端、CLI 与跨代理 Skill | [下载 x64 Bundle](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-arm64-bundle.zip`** | Windows ARM64 | **ARM64 完整便携包**：内含 `arm64` 桌面程序、全部 PowerShell 脚本、`skills/` 及文档 | 解压即用，支持完整 ARM64 桌面端、CLI 与跨代理 Skill | [下载 ARM64 Bundle](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`SHA256SUMS.txt`** | 全平台 | **完整性校验清单**：包含上述全部 6 个 `x64` / `arm64` 发布产物的 64 位 SHA-256 哈希 | 下载后使用 PowerShell `Get-FileHash -Algorithm SHA256` 对照核验 | [查看校验文件](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
 
 ---
 

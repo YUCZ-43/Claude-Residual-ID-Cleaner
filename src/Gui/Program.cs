@@ -210,6 +210,10 @@ namespace ClaudeResidualIdCleaner
         public int DataGridColumnCount;
         public bool InitialCleanButtonEnabled;
         public bool BackendFound;
+        public bool UsedEmbeddedEngine;
+        public bool HasEmbeddedCoreScriptResource;
+        public string CoreScriptPath;
+        public string SelfExePath;
         public string ResolvedToolkitRoot;
         public bool DryRun;
         public int NavTabCount;
@@ -283,8 +287,13 @@ namespace ClaudeResidualIdCleaner
         internal static readonly Brush BrushBadgeProtectedBorder = CreateBrush(217, 70, 239);
         internal static readonly Brush BrushBadgeProtectedFg = CreateBrush(245, 208, 254);
 
+        private const string EmbeddedCoreScriptResourceName = "ClaudeCleanup.ps1";
+
         private string _lang;
         private string _toolkitRoot;
+        private readonly string _toolkitRootOverride;
+        private string _coreScriptPath = string.Empty;
+        private bool _usedEmbeddedEngine;
         private readonly bool _dryRun;
         private readonly bool _demoAudit;
         private readonly bool _isElevated;
@@ -487,7 +496,8 @@ namespace ClaudeResidualIdCleaner
             _isElevated = IsProcessElevated();
             _activeNavIndex = (initialNavIndex >= 0 && initialNavIndex <= 2) ? initialNavIndex : 0;
             _logsExpanded = demoAudit;
-            _toolkitRoot = ResolveToolkitRoot(toolkitRootOverride);
+            _toolkitRootOverride = toolkitRootOverride;
+            _coreScriptPath = ResolveCoreScriptPath(toolkitRootOverride, out _toolkitRoot, out _usedEmbeddedEngine);
 
             Width = 1360;
             Height = 920;
@@ -517,6 +527,8 @@ namespace ClaudeResidualIdCleaner
             UpdateMetricCards();
             UpdateAccountIdCard();
             AppendLog("Toolkit root: " + (string.IsNullOrEmpty(_toolkitRoot) ? "<not resolved>" : _toolkitRoot));
+            AppendLog("Core engine: " + (string.IsNullOrEmpty(_coreScriptPath) ? "<missing>" : _coreScriptPath) +
+                (_usedEmbeddedEngine ? " [embedded]" : " [disk]"));
         }
 
         private static bool IsProcessElevated()
@@ -906,22 +918,204 @@ namespace ClaudeResidualIdCleaner
             Resources.MergedDictionaries.Add(dict);
         }
 
-        private static string ResolveToolkitRoot(string explicitRoot)
+        internal static string GetCurrentExecutablePath()
         {
+            try
+            {
+                using (var proc = Process.GetCurrentProcess())
+                {
+                    if (proc.MainModule != null && !string.IsNullOrEmpty(proc.MainModule.FileName))
+                    {
+                        return Path.GetFullPath(proc.MainModule.FileName);
+                    }
+                }
+            }
+            catch
+            {
+            }
+            try
+            {
+                string loc = Assembly.GetExecutingAssembly().Location;
+                return string.IsNullOrEmpty(loc) ? string.Empty : Path.GetFullPath(loc);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string ComputeSha256LowerHex(byte[] data)
+        {
+            if (data == null) return string.Empty;
+            using (var sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(data);
+                var sb = new StringBuilder(hash.Length * 2);
+                for (int i = 0; i < hash.Length; i++)
+                {
+                    sb.Append(hash[i].ToString("x2"));
+                }
+                return sb.ToString();
+            }
+        }
+
+        private static bool HasEmbeddedCoreScript()
+        {
+            try
+            {
+                return Assembly.GetExecutingAssembly().GetManifestResourceInfo(EmbeddedCoreScriptResourceName) != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string ExtractEmbeddedCoreScript(out string workspaceRoot)
+        {
+            workspaceRoot = string.Empty;
+            try
+            {
+                using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(EmbeddedCoreScriptResourceName))
+                {
+                    if (stream == null)
+                    {
+                        return string.Empty;
+                    }
+
+                    byte[] rawBytes;
+                    using (var ms = new MemoryStream())
+                    {
+                        stream.CopyTo(ms);
+                        rawBytes = ms.ToArray();
+                    }
+
+                    if (rawBytes.Length == 0)
+                    {
+                        return string.Empty;
+                    }
+
+                    string expectedSha = ComputeSha256LowerHex(rawBytes);
+                    if (string.IsNullOrEmpty(expectedSha) || expectedSha.Length < 16)
+                    {
+                        return string.Empty;
+                    }
+
+                    string localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+                    if (string.IsNullOrEmpty(localAppData))
+                    {
+                        localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    }
+                    if (string.IsNullOrEmpty(localAppData))
+                    {
+                        localAppData = Path.GetTempPath();
+                    }
+
+                    string engineDir = Path.Combine(
+                        Path.Combine(Path.Combine(localAppData, "Claude-Residual-ID-Cleaner"), "engine"),
+                        expectedSha.Substring(0, 16));
+                    string targetScript = Path.Combine(engineDir, "ClaudeCleanup.ps1");
+
+                    if (File.Exists(targetScript))
+                    {
+                        string existingSha = ComputeSha256LowerHex(File.ReadAllBytes(targetScript));
+                        if (string.Equals(existingSha, expectedSha, StringComparison.Ordinal))
+                        {
+                            workspaceRoot = engineDir;
+                            return targetScript;
+                        }
+                    }
+
+                    Directory.CreateDirectory(engineDir);
+                    string tempScript = targetScript + ".tmp-" + Guid.NewGuid().ToString("N");
+                    try
+                    {
+                        using (var fs = new FileStream(tempScript, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            fs.Write(rawBytes, 0, rawBytes.Length);
+                            fs.Flush(true);
+                        }
+
+                        string writtenSha = ComputeSha256LowerHex(File.ReadAllBytes(tempScript));
+                        if (!string.Equals(writtenSha, expectedSha, StringComparison.Ordinal))
+                        {
+                            throw new IOException("Embedded core script SHA-256 verification failed.");
+                        }
+
+                        try
+                        {
+                            if (File.Exists(targetScript))
+                            {
+                                File.Delete(targetScript);
+                            }
+                            File.Move(tempScript, targetScript);
+                        }
+                        catch
+                        {
+                            if (!File.Exists(targetScript))
+                            {
+                                throw;
+                            }
+                            string concurrentSha = ComputeSha256LowerHex(File.ReadAllBytes(targetScript));
+                            if (!string.Equals(concurrentSha, expectedSha, StringComparison.Ordinal))
+                            {
+                                throw;
+                            }
+                        }
+
+                        workspaceRoot = engineDir;
+                        return targetScript;
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (File.Exists(tempScript))
+                            {
+                                File.Delete(tempScript);
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                workspaceRoot = string.Empty;
+                return string.Empty;
+            }
+        }
+
+        private static string ResolveCoreScriptPath(string explicitRoot, out string workspaceRoot, out bool usedEmbeddedEngine)
+        {
+            workspaceRoot = string.Empty;
+            usedEmbeddedEngine = false;
+
             if (!string.IsNullOrEmpty(explicitRoot))
             {
-                string full = Path.GetFullPath(explicitRoot);
-                if (File.Exists(Path.Combine(full, "ClaudeCleanup.ps1")))
+                try
                 {
-                    return full;
+                    string full = Path.GetFullPath(explicitRoot);
+                    string explicitScript = Path.Combine(full, "ClaudeCleanup.ps1");
+                    if (File.Exists(explicitScript))
+                    {
+                        workspaceRoot = full;
+                        return explicitScript;
+                    }
+                }
+                catch
+                {
                 }
             }
 
             string baseDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+            DirectoryInfo parentInfo = Directory.GetParent(baseDir);
             string[] candidates = new string[]
             {
                 baseDir,
-                Directory.GetParent(baseDir) != null ? Directory.GetParent(baseDir).FullName : string.Empty,
+                parentInfo != null ? parentInfo.FullName : string.Empty,
                 Environment.CurrentDirectory
             };
             for (int i = 0; i < candidates.Length; i++)
@@ -931,16 +1125,34 @@ namespace ClaudeResidualIdCleaner
                 try
                 {
                     string full = Path.GetFullPath(cand);
-                    if (File.Exists(Path.Combine(full, "ClaudeCleanup.ps1")))
+                    string diskScript = Path.Combine(full, "ClaudeCleanup.ps1");
+                    if (File.Exists(diskScript))
                     {
-                        return full;
+                        workspaceRoot = full;
+                        return diskScript;
                     }
                 }
                 catch
                 {
                 }
             }
+
+            string extractedPath = ExtractEmbeddedCoreScript(out workspaceRoot);
+            if (!string.IsNullOrEmpty(extractedPath) && File.Exists(extractedPath))
+            {
+                usedEmbeddedEngine = true;
+                return extractedPath;
+            }
+
             return string.Empty;
+        }
+
+        private static string ResolveToolkitRoot(string explicitRoot)
+        {
+            string workspaceRoot;
+            bool embedded;
+            ResolveCoreScriptPath(explicitRoot, out workspaceRoot, out embedded);
+            return workspaceRoot;
         }
 
         private void BuildLayout()
@@ -3280,7 +3492,11 @@ namespace ClaudeResidualIdCleaner
                 ScopeCheckboxCount = _scopeCheckboxes.Count,
                 DataGridColumnCount = _gridResults.Columns.Count,
                 InitialCleanButtonEnabled = initClean,
-                BackendFound = !string.IsNullOrEmpty(_toolkitRoot),
+                BackendFound = (!string.IsNullOrEmpty(_coreScriptPath) && File.Exists(_coreScriptPath)),
+                UsedEmbeddedEngine = _usedEmbeddedEngine,
+                HasEmbeddedCoreScriptResource = HasEmbeddedCoreScript(),
+                CoreScriptPath = _coreScriptPath ?? string.Empty,
+                SelfExePath = GetCurrentExecutablePath(),
                 ResolvedToolkitRoot = _toolkitRoot,
                 DryRun = _dryRun,
                 NavTabCount = _navButtons.Count,
@@ -3366,7 +3582,11 @@ namespace ClaudeResidualIdCleaner
 
         private bool EnsureBackend()
         {
-            if (!string.IsNullOrEmpty(_toolkitRoot) && File.Exists(Path.Combine(_toolkitRoot, "ClaudeCleanup.ps1")))
+            if (string.IsNullOrEmpty(_coreScriptPath) || !File.Exists(_coreScriptPath))
+            {
+                _coreScriptPath = ResolveCoreScriptPath(_toolkitRootOverride, out _toolkitRoot, out _usedEmbeddedEngine);
+            }
+            if (!string.IsNullOrEmpty(_coreScriptPath) && File.Exists(_coreScriptPath))
             {
                 return true;
             }
@@ -4107,8 +4327,16 @@ namespace ClaudeResidualIdCleaner
 
         private void RunBackendAsync(string[] scriptArgs, Action<string> onProgressLine, Action<BackendRunResult> onDone)
         {
+            if (string.IsNullOrEmpty(_coreScriptPath) || !File.Exists(_coreScriptPath))
+            {
+                _coreScriptPath = ResolveCoreScriptPath(_toolkitRootOverride, out _toolkitRoot, out _usedEmbeddedEngine);
+            }
             string psExe = FindPowerShellExecutable();
-            string backend = Path.Combine(_toolkitRoot, "ClaudeCleanup.ps1");
+            string backend = _coreScriptPath;
+            string backendDir = (!string.IsNullOrEmpty(backend) && File.Exists(backend))
+                ? Path.GetDirectoryName(backend)
+                : _toolkitRoot;
+            string selfExePath = GetCurrentExecutablePath();
 
             var allArgs = new List<string>();
             allArgs.Add("-NoProfile");
@@ -4134,6 +4362,7 @@ namespace ClaudeResidualIdCleaner
                         {
                             FileName = psExe,
                             Arguments = string.Join(" ", allArgs.ToArray()),
+                            WorkingDirectory = !string.IsNullOrEmpty(backendDir) ? backendDir : Environment.CurrentDirectory,
                             UseShellExecute = false,
                             CreateNoWindow = true,
                             RedirectStandardOutput = true,
@@ -4143,6 +4372,10 @@ namespace ClaudeResidualIdCleaner
                         };
                         psi.EnvironmentVariables["NO_COLOR"] = "1";
                         psi.EnvironmentVariables["TERM"] = "dumb";
+                        if (!string.IsNullOrEmpty(selfExePath))
+                        {
+                            psi.EnvironmentVariables["CLAUDE_CLEANUP_SELF_EXE"] = selfExePath;
+                        }
                         using (var proc = new Process { StartInfo = psi })
                         {
                             proc.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
@@ -5356,6 +5589,18 @@ namespace ClaudeResidualIdCleaner
 
     internal static class Program
     {
+        private static void WriteSelfTestJson(string selfTestOut, SelfTestReport report)
+        {
+            if (string.IsNullOrEmpty(selfTestOut) || report == null) return;
+            string parent = Path.GetDirectoryName(Path.GetFullPath(selfTestOut));
+            if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+            {
+                Directory.CreateDirectory(parent);
+            }
+            var ser = new JavaScriptSerializer();
+            File.WriteAllText(selfTestOut, ser.Serialize(report), new UTF8Encoding(false));
+        }
+
         [STAThread]
         private static int Main(string[] args)
         {
@@ -5364,6 +5609,7 @@ namespace ClaudeResidualIdCleaner
             string selfTestOut = null;
             string capturePngPath = null;
             bool headless = false;
+            bool smokeUi = false;
             bool dryRun = false;
             bool demoAudit = false;
             bool demoCleaning = false;
@@ -5377,6 +5623,10 @@ namespace ClaudeResidualIdCleaner
                 if (string.Equals(a, "--headless", StringComparison.OrdinalIgnoreCase))
                 {
                     headless = true;
+                }
+                else if (string.Equals(a, "--smoke-ui", StringComparison.OrdinalIgnoreCase))
+                {
+                    smokeUi = true;
                 }
                 else if (string.Equals(a, "--dry-run", StringComparison.OrdinalIgnoreCase))
                 {
@@ -5424,6 +5674,27 @@ namespace ClaudeResidualIdCleaner
                 }
             }
 
+            if (smokeUi)
+            {
+                var smokeApp = new Application();
+                var smokeWin = new MainWindow(language, toolkitRoot, true, demoAudit, initialNavIndex);
+                smokeWin.WindowStartupLocation = WindowStartupLocation.Manual;
+                smokeWin.Left = -32000;
+                smokeWin.Top = -32000;
+                smokeWin.ShowInTaskbar = false;
+                smokeWin.Width = 1360;
+                smokeWin.Height = 920;
+                smokeWin.Show();
+                MainWindow.PumpDispatcher();
+                smokeWin.UpdateLayout();
+                MainWindow.PumpDispatcher();
+                SelfTestReport smokeReport = smokeWin.BuildSelfTestReport();
+                smokeWin.Close();
+                smokeApp.Shutdown(0);
+                WriteSelfTestJson(selfTestOut, smokeReport);
+                return smokeReport.BackendFound ? 0 : 2;
+            }
+
             if (headless || !string.IsNullOrEmpty(selfTestOut))
             {
                 var win = new MainWindow(language, toolkitRoot, dryRun, demoAudit, initialNavIndex);
@@ -5441,16 +5712,7 @@ namespace ClaudeResidualIdCleaner
                 }
                 SelfTestReport report = win.BuildSelfTestReport();
                 win.Close();
-                if (!string.IsNullOrEmpty(selfTestOut))
-                {
-                    string parent = Path.GetDirectoryName(Path.GetFullPath(selfTestOut));
-                    if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
-                    {
-                        Directory.CreateDirectory(parent);
-                    }
-                    var ser = new JavaScriptSerializer();
-                    File.WriteAllText(selfTestOut, ser.Serialize(report), new UTF8Encoding(false));
-                }
+                WriteSelfTestJson(selfTestOut, report);
                 return 0;
             }
 

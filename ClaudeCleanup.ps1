@@ -774,6 +774,9 @@ function Assert-AuthorizedPath {
         (Join-Path $env:USERPROFILE '.agents'),
         (Join-Path $env:USERPROFILE '.gemini')
     )
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $subtreeProtected += (Join-Path $env:LOCALAPPDATA 'Claude-Residual-ID-Cleaner')
+    }
     foreach ($p in $subtreeProtected) {
         if (-not $p) { continue }
         $base = Get-NormalPath $p
@@ -2008,6 +2011,14 @@ function Get-ClaudeProcess {
     if (-not [string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
         try { $projRootNorm = [IO.Path]::GetFullPath($script:ProjectRoot).TrimEnd('\', '/') + '\' } catch {}
     }
+    $localCleanerNorm = ''
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        try { $localCleanerNorm = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Claude-Residual-ID-Cleaner')).TrimEnd('\', '/') + '\' } catch {}
+    }
+    $selfExeNorm = ''
+    if (-not [string]::IsNullOrWhiteSpace($env:CLAUDE_CLEANUP_SELF_EXE)) {
+        try { $selfExeNorm = [IO.Path]::GetFullPath($env:CLAUDE_CLEANUP_SELF_EXE) } catch {}
+    }
 
     $cimNativeHostsByPid = @{}
     if ($null -eq $ProcessesOverride) {
@@ -2092,14 +2103,17 @@ function Get-ClaudeProcess {
             if ($leaf -match '(?i)^(?:claude-residual-id-cleaner(?:-setup)?|claudecleanup(?:launcher|gui)?)(?:\.exe)?$') {
                 continue
             }
-            if (-not [string]::IsNullOrEmpty($projRootNorm)) {
-                try {
-                    $fullProcPath = [IO.Path]::GetFullPath($procPath)
-                    if ($fullProcPath.StartsWith($projRootNorm, [StringComparison]::OrdinalIgnoreCase)) {
-                        continue
-                    }
-                } catch {}
-            }
+            try {
+                $fullProcPath = [IO.Path]::GetFullPath($procPath)
+                if (-not [string]::IsNullOrEmpty($selfExeNorm) -and
+                    $fullProcPath.Equals($selfExeNorm, [StringComparison]::OrdinalIgnoreCase)) {
+                    continue
+                }
+                if ((-not [string]::IsNullOrEmpty($projRootNorm) -and $fullProcPath.StartsWith($projRootNorm, [StringComparison]::OrdinalIgnoreCase)) -or
+                    (-not [string]::IsNullOrEmpty($localCleanerNorm) -and $fullProcPath.StartsWith($localCleanerNorm, [StringComparison]::OrdinalIgnoreCase))) {
+                    continue
+                }
+            } catch {}
         }
 
         $matched.Add([pscustomobject]@{

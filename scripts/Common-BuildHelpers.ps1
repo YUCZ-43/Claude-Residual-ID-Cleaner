@@ -59,7 +59,10 @@ function Resolve-BuildOutputPath {
 }
 
 function Get-DotNetFrameworkCompilerInfo {
-    param([Parameter(Mandatory = $true)][string[]]$ReferenceNames)
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ReferenceNames,
+        [ValidateSet('anycpu', 'x86', 'x64', 'arm64')][string]$Platform = 'x64'
+    )
 
     $fxRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
     if (-not (Test-Path -LiteralPath $fxRoot -PathType Container)) {
@@ -68,14 +71,18 @@ function Get-DotNetFrameworkCompilerInfo {
     $cscExe = Join-Path $fxRoot 'csc.exe'
     $wpfDir = Join-Path $fxRoot 'WPF'
 
-    if (-not (Test-Path -LiteralPath $cscExe -PathType Leaf)) {
-        throw ".NET Framework C# compiler csc.exe not found at: $cscExe"
-    }
     if (-not (Test-Path -LiteralPath $wpfDir -PathType Container)) {
         throw ".NET Framework WPF assemblies directory not found at: $wpfDir"
     }
 
     $refs = New-Object 'System.Collections.Generic.List[string]'
+    if ($Platform -eq 'arm64') {
+        $mscorlibPath = Join-Path $fxRoot 'mscorlib.dll'
+        if (-not (Test-Path -LiteralPath $mscorlibPath -PathType Leaf)) {
+            throw "Required .NET mscorlib.dll not found: $mscorlibPath"
+        }
+        $refs.Add($mscorlibPath)
+    }
     foreach ($name in $ReferenceNames) {
         $candidate = if ($name -in @('WindowsBase.dll', 'PresentationCore.dll', 'PresentationFramework.dll')) {
             Join-Path $wpfDir $name
@@ -88,11 +95,39 @@ function Get-DotNetFrameworkCompilerInfo {
         $refs.Add($candidate)
     }
 
+    $compilerDll = ''
+    if ($Platform -eq 'arm64') {
+        $dotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
+        if ($null -eq $dotnetCmd) {
+            throw ".NET SDK (dotnet) is required to compile /platform:arm64 binaries cleanly."
+        }
+        $dotnetExe = $dotnetCmd.Source
+        $sdkBase = Join-Path (Split-Path -Parent $dotnetExe) 'sdk'
+        $cscDllItem = $null
+        if (Test-Path -LiteralPath $sdkBase -PathType Container) {
+            $cscDllItem = Get-ChildItem -LiteralPath $sdkBase -Filter 'csc.dll' -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match 'Roslyn[\\/]bincore[\\/]csc\.dll$' } |
+                Sort-Object FullName -Descending |
+                Select-Object -First 1
+        }
+        if ($null -eq $cscDllItem) {
+            throw "Roslyn csc.dll not found under .NET SDK directory ($sdkBase) for /platform:arm64 compilation."
+        }
+        $cscExe = $dotnetExe
+        $compilerDll = $cscDllItem.FullName
+    } else {
+        if (-not (Test-Path -LiteralPath $cscExe -PathType Leaf)) {
+            throw ".NET Framework C# compiler csc.exe not found at: $cscExe"
+        }
+    }
+
     return [pscustomobject]@{
-        FxRoot     = $fxRoot
-        CscExe     = $cscExe
-        WpfDir     = $wpfDir
-        References = @($refs.ToArray())
+        FxRoot      = $fxRoot
+        CscExe      = $cscExe
+        CompilerDll = $compilerDll
+        Platform    = $Platform
+        WpfDir      = $wpfDir
+        References  = @($refs.ToArray())
     }
 }
 
@@ -130,6 +165,9 @@ function Get-FileSha256LowerHex {
 function Invoke-WinExeCscCompile {
     param(
         [Parameter(Mandatory = $true)][string]$CscExe,
+        [string]$CompilerDll = '',
+        [string]$FxRoot = '',
+        [ValidateSet('anycpu', 'x86', 'x64', 'arm64')][string]$Platform = 'x64',
         [Parameter(Mandatory = $true)][string]$OutputPath,
         [Parameter(Mandatory = $true)][string[]]$References,
         [Parameter(Mandatory = $true)][string[]]$SourceFiles,
@@ -143,10 +181,16 @@ function Invoke-WinExeCscCompile {
     $cscArgs = New-Object 'System.Collections.Generic.List[string]'
     $cscArgs.Add('/nologo')
     $cscArgs.Add('/target:winexe')
-    $cscArgs.Add('/platform:anycpu')
+    $cscArgs.Add("/platform:$Platform")
     $cscArgs.Add('/optimize+')
     $cscArgs.Add('/utf8output')
     $cscArgs.Add('/codepage:65001')
+    if (-not [string]::IsNullOrWhiteSpace($CompilerDll)) {
+        $cscArgs.Add('/nowarn:CS8012')
+        if (-not [string]::IsNullOrWhiteSpace($FxRoot)) {
+            $cscArgs.Add("/lib:$FxRoot")
+        }
+    }
     if (-not [string]::IsNullOrWhiteSpace($IconPath) -and (Test-Path -LiteralPath $IconPath -PathType Leaf)) {
         $cscArgs.Add("/win32icon:$IconPath")
         if (-not [string]::IsNullOrWhiteSpace($IconResourceName)) {
@@ -169,7 +213,11 @@ function Invoke-WinExeCscCompile {
         $cscArgs.Add($src)
     }
 
-    $outputLines = & $CscExe @($cscArgs.ToArray()) 2>&1
+    if (-not [string]::IsNullOrWhiteSpace($CompilerDll)) {
+        $outputLines = & $CscExe $CompilerDll @($cscArgs.ToArray()) 2>&1
+    } else {
+        $outputLines = & $CscExe @($cscArgs.ToArray()) 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         $msg = ($outputLines | Out-String)
         throw "$FailureLabel failed with exit code ${LASTEXITCODE}:`n$msg"
@@ -178,12 +226,24 @@ function Invoke-WinExeCscCompile {
         throw "$FailureLabel reported exit 0, but executable was not found at: $OutputPath"
     }
 
+    $peBytes = [System.IO.File]::ReadAllBytes($OutputPath)
+    $peOffset = [BitConverter]::ToInt32($peBytes, 0x3C)
+    $machineVal = [BitConverter]::ToUInt16($peBytes, $peOffset + 4)
+    $peMachineHex = ('0x{0:X4}' -f $machineVal)
+    if ($Platform -eq 'x64' -and $machineVal -ne 0x8664) {
+        throw "$FailureLabel expected x64 PE Machine 0x8664, got $peMachineHex ($OutputPath)"
+    }
+    if ($Platform -eq 'arm64' -and $machineVal -ne 0xAA64) {
+        throw "$FailureLabel expected arm64 PE Machine 0xAA64, got $peMachineHex ($OutputPath)"
+    }
+
     $fileInfo = Get-Item -LiteralPath $OutputPath
     $sha256 = Get-FileSha256LowerHex -Path $OutputPath
     return [pscustomobject]@{
         OutputPath = $OutputPath
         SizeBytes  = [int64]$fileInfo.Length
         Sha256     = $sha256
+        PeMachine  = $peMachineHex
     }
 }
 

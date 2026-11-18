@@ -413,10 +413,16 @@ try {
         ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-setup\.exe') -and
         ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-portable\.exe') -and
         ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-bundle\.zip') -and
+        ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-arm64-setup\.exe') -and
+        ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-arm64-portable\.exe') -and
+        ($rootReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-arm64-bundle\.zip') -and
         ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-setup\.exe') -and
         ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-portable\.exe') -and
-        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-bundle\.zip')
-    ) 'Public READMEs, NOTICE, LICENSE, and guides use clean MIT licensing, standardized 0.1.0-x64 release names, and zero suyuan2022 or old repo references'
+        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-x64-bundle\.zip') -and
+        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-arm64-setup\.exe') -and
+        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-arm64-portable\.exe') -and
+        ($enReadmeText -match 'Claude-Residual-ID-Cleaner-0\.1\.0-arm64-bundle\.zip')
+    ) 'Public READMEs, NOTICE, LICENSE, and guides use clean MIT licensing, standardized 0.1.0-x64/arm64 release names, and zero suyuan2022 or old repo references'
 
     $docLinkFiles = @($rootReadmePath, $enReadmePath, $skillsGuideZhPath, $skillsGuideEnPath)
     $allDocLinksOk = $true

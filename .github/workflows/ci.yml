@@ -407,7 +407,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build and verify standalone Desktop WPF .exe
+      - name: Build and verify self-contained Desktop WPF .exe (x64 & isolated smoke)
         shell: pwsh
         run: |
           Set-StrictMode -Version 2.0
@@ -419,40 +419,42 @@ jobs:
             New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
           }
           $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe'
-          $selfTestJson = Join-Path '${{ runner.temp }}' ('release-exe-selftest-' + [Guid]::NewGuid().ToString('N') + '.json')
+          $isolatedDir = Join-Path '${{ runner.temp }}' ('isolated-portable-' + [Guid]::NewGuid().ToString('N'))
+          $isolatedExe = Join-Path $isolatedDir 'Claude-Residual-ID-Cleaner.exe'
+          $selfTestJson = Join-Path $isolatedDir 'release-exe-selftest.json'
 
           try {
+            New-Item -ItemType Directory -Path $isolatedDir -Force | Out-Null
             $build = & (Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1') -Version '0.1.0' -Arch 'x64' -OutputPath $exeOut
             if (-not $build.Succeeded -or -not (Test-Path -LiteralPath $exeOut -PathType Leaf)) {
               throw 'Failed to compile Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe for release artifacts.'
             }
+            [IO.File]::Copy($exeOut, $isolatedExe, $true)
 
             $bytes = [System.IO.File]::ReadAllBytes($exeOut)
-            if ($bytes.Length -lt 256 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
-              throw "Invalid DOS header in compiled executable: $exeOut"
-            }
             $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-            if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45) {
-              throw "Invalid PE signature in compiled executable: $exeOut"
-            }
+            $machine = [int][BitConverter]::ToUInt16($bytes, $peOffset + 4)
             $subsystem = [int][BitConverter]::ToUInt16($bytes, $peOffset + 24 + 68)
-            if ($subsystem -ne 2) {
-              throw "Expected PE Subsystem 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI), got $subsystem"
+            if ($machine -ne 0x8664 -or $subsystem -ne 2) {
+              throw "Expected x64 GUI PE (Machine=0x8664, Subsystem=2), got Machine=$machine Subsystem=$subsystem"
             }
 
-            $proc = [System.Diagnostics.Process]::Start($exeOut, "--headless --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$selfTestJson`"")
+            $psi = [System.Diagnostics.ProcessStartInfo]::new($isolatedExe, "--smoke-ui --language zh-CN --self-test `"$selfTestJson`"")
+            $psi.WorkingDirectory = $isolatedDir
+            $psi.UseShellExecute = $false
+            $proc = [System.Diagnostics.Process]::Start($psi)
             $proc.WaitForExit()
             if ($proc.ExitCode -ne 0) {
-              throw "Standalone WPF .exe headless self-test exited $($proc.ExitCode)"
+              throw "Standalone WPF .exe isolated --smoke-ui self-test exited $($proc.ExitCode)"
             }
             $report = [IO.File]::ReadAllText($selfTestJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-            if (-not $report.AppInstantiated -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled -or $report.NavTabCount -ne 3 -or (-not $report.HasWindowIcon)) {
-              throw 'Standalone WPF .exe self-test reported invalid UI/safety state.'
+            if (-not $report.AppInstantiated -or -not $report.BackendFound -or -not $report.UsedEmbeddedEngine -or -not $report.HasEmbeddedCoreScriptResource -or $report.InitialLanguage -ne 'zh-CN' -or $report.ToggledLanguage -ne 'en-US' -or $report.InitialCleanButtonEnabled -or $report.NavTabCount -ne 3 -or (-not $report.HasWindowIcon)) {
+              throw 'Standalone WPF .exe isolated smoke self-test reported invalid UI/embedded-engine/safety state.'
             }
-            Write-Host "RELEASE_EXE_OK: Built $($build.SizeBytes) bytes, PE Subsystem=$subsystem, SHA256=$($build.Sha256)."
+            Write-Host "RELEASE_EXE_OK: Built $($build.SizeBytes) bytes, Machine=0x$($machine.ToString('X4')), Subsystem=$subsystem, EmbeddedEngine=$($report.UsedEmbeddedEngine), SHA256=$($build.Sha256)."
           } finally {
-            if (Test-Path -LiteralPath $selfTestJson) {
-              Remove-Item -LiteralPath $selfTestJson -Force
+            if (Test-Path -LiteralPath $isolatedDir) {
+              Remove-Item -LiteralPath $isolatedDir -Recurse -Force
             }
           }
 
@@ -468,19 +470,13 @@ jobs:
           $setupOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe'
           $setupSmokeDir = Join-Path '${{ runner.temp }}' ('setup-smoke-' + [Guid]::NewGuid().ToString('N'))
           $setupSelfTest = Join-Path $setupSmokeDir 'setup-selftest.json'
+          $installedSmokeJson = Join-Path $setupSmokeDir 'installed-smoke.json'
           $setupInstallRoot = Join-Path $setupSmokeDir 'installed-app'
 
           try {
             $setupBuild = & (Join-Path $repoRoot 'scripts\Build-Installer.ps1') -Version '0.1.0' -Arch 'x64' -OutputPath $setupOut -DesktopExePath $exeOut
             if (-not $setupBuild.Succeeded -or -not (Test-Path -LiteralPath $setupOut -PathType Leaf)) {
               throw 'Failed to compile Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe for release artifacts.'
-            }
-
-            $bytes = [System.IO.File]::ReadAllBytes($setupOut)
-            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-            $subsystem = [int][BitConverter]::ToUInt16($bytes, $peOffset + 24 + 68)
-            if ($subsystem -ne 2) {
-              throw "Expected Setup PE Subsystem 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI), got $subsystem"
             }
 
             $pInst = [System.Diagnostics.Process]::Start($setupOut, "--headless --no-registry --no-shortcuts --install-dir `"$setupInstallRoot`" --self-test `"$setupSelfTest`"")
@@ -492,14 +488,29 @@ jobs:
             if (-not $instRep.Succeeded -or -not $instRep.HasWindowIcon) {
               throw 'Setup .exe headless install self-test reported invalid state.'
             }
-            Write-Host "RELEASE_SETUP_OK: Built $($setupBuild.SizeBytes) bytes, PE Subsystem=$subsystem, SHA256=$($setupBuild.Sha256)."
+
+            $installedExe = Join-Path $setupInstallRoot 'Claude-Residual-ID-Cleaner.exe'
+            $installedPs1 = Join-Path $setupInstallRoot 'ClaudeCleanup.ps1'
+            if (Test-Path -LiteralPath $installedPs1) {
+              Remove-Item -LiteralPath $installedPs1 -Force
+            }
+            $pSmoke = [System.Diagnostics.Process]::Start($installedExe, "--smoke-ui --self-test `"$installedSmokeJson`"")
+            $pSmoke.WaitForExit()
+            if ($pSmoke.ExitCode -ne 0) {
+              throw "Installed .exe standalone fallback --smoke-ui exited $($pSmoke.ExitCode)"
+            }
+            $installedRep = [IO.File]::ReadAllText($installedSmokeJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if (-not $installedRep.BackendFound -or -not $installedRep.UsedEmbeddedEngine) {
+              throw 'Installed .exe failed embedded engine fallback when adjacent .ps1 was absent.'
+            }
+            Write-Host "RELEASE_SETUP_OK: Built $($setupBuild.SizeBytes) bytes, SHA256=$($setupBuild.Sha256), installed fallback verified."
           } finally {
             if (Test-Path -LiteralPath $setupSmokeDir) {
               Remove-Item -LiteralPath $setupSmokeDir -Recurse -Force
             }
           }
 
-      - name: Build and verify release ZIP bundle with SHA256SUMS.txt
+      - name: Build and verify x64 & arm64 release matrix with SHA256SUMS.txt
         shell: pwsh
         run: |
           Set-StrictMode -Version 2.0
@@ -507,69 +518,62 @@ jobs:
 
           $repoRoot = (Resolve-Path -LiteralPath '.').Path
           $artifactDir = Join-Path '${{ runner.temp }}' 'release-artifacts'
-          $exeOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe'
-          $setupOut = Join-Path $artifactDir 'Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe'
+          $pkg = & (Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1') -OutputDirectory $artifactDir -Version '0.1.0' -BuildSetupExe
 
-          $pkg = & (Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1') -OutputDirectory $artifactDir -Version '0.1.0' -Arch 'x64' -DesktopExePath $exeOut
-          if (-not (Test-Path -LiteralPath $pkg.PackagePath -PathType Leaf)) {
-            throw "Release ZIP missing: $($pkg.PackagePath)"
-          }
-          if (-not (Test-Path -LiteralPath $pkg.Sha256SumsPath -PathType Leaf)) {
-            throw "SHA256SUMS.txt missing: $($pkg.Sha256SumsPath)"
-          }
-
-          Add-Type -AssemblyName System.IO.Compression
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipEntries = New-Object 'System.Collections.Generic.List[string]'
-          $archive = [System.IO.Compression.ZipFile]::OpenRead($pkg.PackagePath)
-          try {
-            foreach ($entry in $archive.Entries) {
-              $zipEntries.Add($entry.FullName)
-            }
-          } finally {
-            $archive.Dispose()
-          }
-          if ($zipEntries -notcontains 'Claude-Residual-ID-Cleaner.exe') {
-            throw 'Release ZIP is missing Claude-Residual-ID-Cleaner.exe at archive root.'
-          }
-
-          $sumLine = ([IO.File]::ReadAllText($pkg.Sha256SumsPath)).Trim()
-          $actualHash = (Get-FileHash -LiteralPath $pkg.PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $expectedLine = "$actualHash  $([IO.Path]::GetFileName($pkg.PackagePath))"
-          if ($sumLine -ne $expectedLine) {
-            throw "SHA256SUMS mismatch. Expected '$expectedLine', got '$sumLine'"
-          }
-
-          $setupHash = (Get-FileHash -LiteralPath $setupOut -Algorithm SHA256).Hash.ToLowerInvariant()
-          $portableHash = (Get-FileHash -LiteralPath $exeOut -Algorithm SHA256).Hash.ToLowerInvariant()
-          $allSumLines = @(
-            "$setupHash  $([IO.Path]::GetFileName($setupOut))",
-            "$portableHash  $([IO.Path]::GetFileName($exeOut))",
-            "$actualHash  $([IO.Path]::GetFileName($pkg.PackagePath))"
+          $expectedArtifacts = @(
+            @{ File = 'Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe'; Machine = 0x8664 },
+            @{ File = 'Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe'; Machine = 0x8664 },
+            @{ File = 'Claude-Residual-ID-Cleaner-0.1.0-arm64-setup.exe'; Machine = 0xAA64 },
+            @{ File = 'Claude-Residual-ID-Cleaner-0.1.0-arm64-portable.exe'; Machine = 0xAA64 },
+            @{ File = 'Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip'; Machine = 0 },
+            @{ File = 'Claude-Residual-ID-Cleaner-0.1.0-arm64-bundle.zip'; Machine = 0 }
           )
-          $utf8NoBom = New-Object 'System.Text.UTF8Encoding'($false)
-          [IO.File]::WriteAllText($pkg.Sha256SumsPath, (($allSumLines -join "`n") + "`n"), $utf8NoBom)
-          Write-Host "RELEASE_BUNDLE_OK: $($pkg.FileCount) entries packaged (incl. Claude-Residual-ID-Cleaner.exe), SHA-256 verified for setup/portable/bundle ($actualHash)."
 
-      - name: Upload standalone Desktop .exe artifact
+          $sumText = [IO.File]::ReadAllText($pkg.Sha256SumsPath, [System.Text.Encoding]::UTF8)
+          foreach ($exp in $expectedArtifacts) {
+            $full = Join-Path $artifactDir $exp.File
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+              throw "Missing release artifact: $($exp.File)"
+            }
+            if ($exp.Machine -ne 0) {
+              $b = [IO.File]::ReadAllBytes($full)
+              $pe = [BitConverter]::ToInt32($b, 0x3C)
+              $m = [int][BitConverter]::ToUInt16($b, $pe + 4)
+              if ($m -ne $exp.Machine) {
+                throw "PE Machine mismatch for $($exp.File): expected $($exp.Machine), got $m"
+              }
+            }
+            $h = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sumText -notmatch ("(?m)^" + [regex]::Escape("$h  $($exp.File)") + "$")) {
+              throw "SHA256SUMS.txt missing exact hash entry for $($exp.File)"
+            }
+          }
+          Write-Host "RELEASE_BUNDLE_OK: Verified all 6 x64/arm64 artifacts + SHA256SUMS.txt."
+
+      - name: Upload standalone Desktop .exe artifacts
         uses: actions/upload-artifact@v4
         with:
           name: claude-residual-id-cleaner-exe
-          path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe
+          path: |
+            ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe
+            ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-arm64-portable.exe
           if-no-files-found: error
 
-      - name: Upload standalone Setup Installer .exe artifact
+      - name: Upload standalone Setup Installer .exe artifacts
         uses: actions/upload-artifact@v4
         with:
           name: claude-residual-id-cleaner-setup-exe
-          path: ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe
+          path: |
+            ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe
+            ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-arm64-setup.exe
           if-no-files-found: error
 
-      - name: Upload release bundle and SHA256SUMS.txt artifact
+      - name: Upload release bundles and SHA256SUMS.txt artifact
         uses: actions/upload-artifact@v4
         with:
           name: claude-residual-id-cleaner-release-bundle
           path: |
             ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip
+            ${{ runner.temp }}/release-artifacts/Claude-Residual-ID-Cleaner-0.1.0-arm64-bundle.zip
             ${{ runner.temp }}/release-artifacts/SHA256SUMS.txt
           if-no-files-found: error

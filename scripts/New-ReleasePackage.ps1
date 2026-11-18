@@ -5,6 +5,7 @@ param(
     [string]$PackageName = 'Claude-Residual-ID-Cleaner',
     [string]$Version = '0.1.0',
     [string]$Arch = 'x64',
+    [string[]]$Platforms = @(),
     [string]$DesktopExePath = '',
     [switch]$ExcludeDesktopExe,
     [switch]$BuildSetupExe
@@ -28,6 +29,28 @@ if ([string]::IsNullOrWhiteSpace($SourceRoot) -or -not (Test-Path -LiteralPath $
 }
 
 $resolvedSourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path.TrimEnd('\', '/')
+
+$targetPlatforms = New-Object 'System.Collections.Generic.List[string]'
+if ($Platforms.Count -gt 0) {
+    foreach ($plat in $Platforms) {
+        if ([string]::IsNullOrWhiteSpace($plat)) { continue }
+        $normPlat = $plat.Trim().ToLowerInvariant()
+        Test-BuildVersionAndArch -Version $Version -Arch $normPlat
+        if (-not $targetPlatforms.Contains($normPlat)) {
+            $targetPlatforms.Add($normPlat)
+        }
+    }
+} elseif ($PSBoundParameters.ContainsKey('Arch') -or -not [string]::IsNullOrWhiteSpace($DesktopExePath)) {
+    $targetPlatforms.Add($Arch.Trim().ToLowerInvariant())
+} elseif ($BuildSetupExe -and (Test-Path -LiteralPath (Join-Path $resolvedSourceRoot 'src\Installer\SetupProgram.cs') -PathType Leaf)) {
+    $targetPlatforms.Add('x64')
+    $targetPlatforms.Add('arm64')
+} else {
+    $targetPlatforms.Add($Arch.Trim().ToLowerInvariant())
+}
+if ($targetPlatforms.Count -eq 0) {
+    throw 'At least one target platform must be specified.'
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $resolvedOutputDir = Join-Path $resolvedSourceRoot 'dist'
@@ -193,13 +216,16 @@ while ($dirStack.Count -gt 0) {
     }
 }
 
-$tempExeBuildDir = ''
-$tempZipPath = ''
+function New-SingleArchReleaseArtifacts {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetArch,
+        [Parameter(Mandatory = $true)][object[]]$BaseIncludedEntries,
+        [Parameter(Mandatory = $true)][string]$TempWorkRoot
+    )
 
-Add-Type -AssemblyName System.IO.Compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archTempDir = Join-Path $TempWorkRoot $TargetArch
+    New-Item -ItemType Directory -Path $archTempDir -Force | Out-Null
 
-try {
     $bundledExePath = ''
     if (-not $ExcludeDesktopExe) {
         if (-not [string]::IsNullOrWhiteSpace($DesktopExePath)) {
@@ -220,14 +246,10 @@ try {
             $guiProgramPath = Join-Path $resolvedSourceRoot 'src\Gui\Program.cs'
             $buildDesktopScriptPath = Join-Path $resolvedSourceRoot 'scripts\Build-DesktopApp.ps1'
             if ((Test-Path -LiteralPath $guiProgramPath -PathType Leaf) -and (Test-Path -LiteralPath $buildDesktopScriptPath -PathType Leaf)) {
-                $tempBase = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } else { [IO.Path]::GetTempPath() }
-                $tempExeBuildDir = Join-Path $tempBase ('claude-release-exe-' + [Guid]::NewGuid().ToString('N'))
-                $tempExeOut = Join-Path $tempExeBuildDir 'Claude-Residual-ID-Cleaner.exe'
-                New-Item -ItemType Directory -Path $tempExeBuildDir -Force | Out-Null
-
-                $buildResult = & $buildDesktopScriptPath -SourceDir (Join-Path $resolvedSourceRoot 'src\Gui') -OutputPath $tempExeOut
+                $tempExeOut = Join-Path $archTempDir 'Claude-Residual-ID-Cleaner.exe'
+                $buildResult = & $buildDesktopScriptPath -SourceDir (Join-Path $resolvedSourceRoot 'src\Gui') -OutputPath $tempExeOut -Platform $TargetArch
                 if ($null -eq $buildResult -or -not $buildResult.Succeeded -or -not (Test-Path -LiteralPath $tempExeOut -PathType Leaf)) {
-                    throw 'Failed to compile Claude-Residual-ID-Cleaner.exe for release packaging.'
+                    throw "Failed to compile Claude-Residual-ID-Cleaner.exe ($TargetArch) for release packaging."
                 }
                 $tempExeItem = Get-Item -LiteralPath $tempExeOut -Force
                 if (($tempExeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -238,33 +260,28 @@ try {
         }
     }
 
+    $archEntries = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($e in $BaseIncludedEntries) {
+        $archEntries.Add($e)
+    }
     if (-not [string]::IsNullOrEmpty($bundledExePath)) {
-        $includedEntries.Add([pscustomobject]@{
+        $archEntries.Add([pscustomobject]@{
             FullName     = $bundledExePath
             RelativePath = 'Claude-Residual-ID-Cleaner.exe'
         })
     }
 
-    $sortedIncluded = @($includedEntries | Sort-Object -Property RelativePath)
+    $sortedIncluded = @($archEntries | Sort-Object -Property RelativePath)
     if ($sortedIncluded.Count -eq 0) {
         throw "No eligible files found to package in '$resolvedSourceRoot'."
     }
 
-    if (-not (Test-Path -LiteralPath $resolvedOutputDir)) {
-        New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
-    }
-
-    $zipFileName = if ([string]::IsNullOrWhiteSpace($Arch)) {
-        "$PackageName-$Version.zip"
-    } else {
-        Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $Arch -Suffix 'bundle.zip'
-    }
-    $portableFileName = Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $Arch -Suffix 'portable.exe'
-    $setupFileName = Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $Arch -Suffix 'setup.exe'
+    $zipFileName = Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $TargetArch -Suffix 'bundle.zip'
+    $portableFileName = Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $TargetArch -Suffix 'portable.exe'
+    $setupFileName = Get-ArtifactStandardName -ProductName $PackageName -Version $Version -Arch $TargetArch -Suffix 'setup.exe'
 
     $zipPath = Join-Path $resolvedOutputDir $zipFileName
-    $tempZipPath = Join-Path $resolvedOutputDir ("$zipFileName.tmp-" + [Guid]::NewGuid().ToString('N'))
-    $sumsPath = Join-Path $resolvedOutputDir 'SHA256SUMS.txt'
+    $tempZipPath = Join-Path $archTempDir $zipFileName
 
     $archive = [System.IO.Compression.ZipFile]::Open($tempZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
     try {
@@ -286,7 +303,6 @@ try {
     [IO.File]::Move($tempZipPath, $zipPath)
 
     $sha256Hex = Get-FileSha256LowerHex -Path $zipPath
-
     $portableExeOutPath = ''
     $portableExeSha256 = ''
     $setupExeOutPath = ''
@@ -306,7 +322,7 @@ try {
             if (-not $normBundled.Equals($normPortable, [StringComparison]::OrdinalIgnoreCase)) {
                 [IO.File]::Copy($bundledExePath, $portableExeOutPath, $true)
             }
-            $portableExeSha256 = (Get-FileHash -LiteralPath $portableExeOutPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $portableExeSha256 = Get-FileSha256LowerHex -Path $portableExeOutPath
         }
 
         $setupExeOutPath = Join-Path $resolvedOutputDir $setupFileName
@@ -315,7 +331,7 @@ try {
             GuiSourceDir = (Join-Path $resolvedSourceRoot 'src\Gui')
             OutputPath   = $setupExeOutPath
             Version      = $Version
-            Arch         = $Arch
+            Platform     = $TargetArch
         }
         if (-not [string]::IsNullOrEmpty($bundledExePath) -and (Test-Path -LiteralPath $bundledExePath -PathType Leaf)) {
             $setupBuildParams['DesktopExePath'] = $bundledExePath
@@ -333,28 +349,69 @@ try {
     }
 
     $sumLines.Add("$sha256Hex  $zipFileName")
-    $sumsContent = ($sumLines.ToArray() -join "`n") + "`n"
+
+    return [pscustomobject]@{
+        Platform          = $TargetArch
+        PackagePath       = $zipPath
+        Sha256            = $sha256Hex
+        FileCount         = $sortedIncluded.Count
+        IncludedFiles     = @($sortedIncluded | ForEach-Object { $_.RelativePath })
+        PortableExePath   = $portableExeOutPath
+        PortableExeSha256 = $portableExeSha256
+        SetupExePath      = $setupExeOutPath
+        SetupExeSha256    = $setupExeSha256
+        ChecksumLines     = @($sumLines.ToArray())
+    }
+}
+
+$tempBase = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } else { [IO.Path]::GetTempPath() }
+$tempWorkRoot = Join-Path $tempBase ('claude-release-build-' + [Guid]::NewGuid().ToString('N'))
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+try {
+    if (-not (Test-Path -LiteralPath $resolvedOutputDir)) {
+        New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
+    }
+    New-Item -ItemType Directory -Path $tempWorkRoot -Force | Out-Null
+
+    $baseEntriesArray = @($includedEntries.ToArray())
+    $archResults = New-Object 'System.Collections.Generic.List[object]'
+    $allSumLines = New-Object 'System.Collections.Generic.List[string]'
+
+    foreach ($plat in $targetPlatforms) {
+        $archOut = New-SingleArchReleaseArtifacts -TargetArch $plat -BaseIncludedEntries $baseEntriesArray -TempWorkRoot $tempWorkRoot
+        $archResults.Add($archOut)
+        foreach ($line in $archOut.ChecksumLines) {
+            $allSumLines.Add($line)
+        }
+    }
+
+    $sumsPath = Join-Path $resolvedOutputDir 'SHA256SUMS.txt'
+    $sumsContent = ($allSumLines.ToArray() -join "`n") + "`n"
     $utf8NoBom = New-Object 'System.Text.UTF8Encoding'($false)
     [IO.File]::WriteAllText($sumsPath, $sumsContent, $utf8NoBom)
+
+    $primaryResult = $archResults[0]
 } finally {
-    if (-not [string]::IsNullOrEmpty($tempZipPath) -and (Test-Path -LiteralPath $tempZipPath)) {
-        try { [IO.File]::Delete($tempZipPath) } catch {}
-    }
-    if (-not [string]::IsNullOrEmpty($tempExeBuildDir) -and (Test-Path -LiteralPath $tempExeBuildDir)) {
-        try { Remove-Item -LiteralPath $tempExeBuildDir -Recurse -Force } catch {}
+    if (-not [string]::IsNullOrEmpty($tempWorkRoot) -and (Test-Path -LiteralPath $tempWorkRoot)) {
+        try { Remove-Item -LiteralPath $tempWorkRoot -Recurse -Force } catch {}
     }
 }
 
 [pscustomobject]@{
-    PackagePath        = $zipPath
+    PackagePath        = $primaryResult.PackagePath
     Sha256SumsPath     = $sumsPath
-    Sha256             = $sha256Hex
-    FileCount          = $sortedIncluded.Count
+    Sha256             = $primaryResult.Sha256
+    FileCount          = $primaryResult.FileCount
     ExcludedCount      = $excludedPaths.Count
-    IncludedFiles      = @($sortedIncluded | ForEach-Object { $_.RelativePath })
+    IncludedFiles      = $primaryResult.IncludedFiles
     ExcludedFiles      = @($excludedPaths)
-    PortableExePath    = $portableExeOutPath
-    PortableExeSha256  = $portableExeSha256
-    SetupExePath       = $setupExeOutPath
-    SetupExeSha256     = $setupExeSha256
+    PortableExePath    = $primaryResult.PortableExePath
+    PortableExeSha256  = $primaryResult.PortableExeSha256
+    SetupExePath       = $primaryResult.SetupExePath
+    SetupExeSha256     = $primaryResult.SetupExeSha256
+    Platforms          = @($targetPlatforms.ToArray())
+    Artifacts          = @($archResults.ToArray())
 }

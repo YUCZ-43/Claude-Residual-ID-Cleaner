@@ -5,7 +5,8 @@ param(
     [string]$OutputPath = '',
     [string]$DesktopExePath = '',
     [string]$Version = '0.1.0',
-    [string]$Arch = 'x64'
+    [ValidateSet('x64', 'arm64')][string]$Arch = 'x64',
+    [string]$Platform = ''
 )
 
 Set-StrictMode -Version 2.0
@@ -13,7 +14,11 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-BuildHelpers.ps1')
 
-Test-BuildVersionAndArch -Version $Version -Arch $Arch
+$targetArch = if (-not [string]::IsNullOrWhiteSpace($Platform)) { $Platform.Trim().ToLowerInvariant() } else { $Arch.Trim().ToLowerInvariant() }
+if ($targetArch -notin @('x64', 'arm64')) {
+    throw "Unsupported target platform '$targetArch'. Allowed: x64, arm64."
+}
+Test-BuildVersionAndArch -Version $Version -Arch $targetArch
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $resolvedSourceDir = if ([string]::IsNullOrWhiteSpace($SourceDir)) {
@@ -36,10 +41,10 @@ if (-not (Test-Path -LiteralPath $setupCs -PathType Leaf)) {
     throw "Required SetupProgram.cs missing under: $resolvedSourceDir"
 }
 
-$defaultSetupName = Get-ArtifactStandardName -Version $Version -Arch $Arch -Suffix 'setup.exe'
+$defaultSetupName = Get-ArtifactStandardName -Version $Version -Arch $targetArch -Suffix 'setup.exe'
 $resolvedOutput = Resolve-BuildOutputPath -RepoRoot $repoRoot -OutputPath $OutputPath -DefaultFileName $defaultSetupName
 
-$compilerInfo = Get-DotNetFrameworkCompilerInfo -ReferenceNames @(
+$compilerInfo = Get-DotNetFrameworkCompilerInfo -Platform $targetArch -ReferenceNames @(
     'System.dll',
     'System.Core.dll',
     'System.IO.Compression.dll',
@@ -70,7 +75,7 @@ try {
     } else {
         $buildDesktopScript = Join-Path $repoRoot 'scripts\Build-DesktopApp.ps1'
         $tempDesktopExe = Join-Path $tempWorkDir 'Claude-Residual-ID-Cleaner.exe'
-        $guiBuild = & $buildDesktopScript -SourceDir $resolvedGuiDir -OutputPath $tempDesktopExe
+        $guiBuild = & $buildDesktopScript -SourceDir $resolvedGuiDir -OutputPath $tempDesktopExe -Version $Version -Platform $targetArch
         if (-not $guiBuild.Succeeded -or -not (Test-Path -LiteralPath $tempDesktopExe -PathType Leaf)) {
             throw 'Failed to build desktop executable for Setup payload.'
         }
@@ -79,7 +84,7 @@ try {
 
     $releasePkgScript = Join-Path $repoRoot 'scripts\New-ReleasePackage.ps1'
     $payloadOutDir = Join-Path $tempWorkDir 'payload'
-    $pkg = & $releasePkgScript -SourceRoot $repoRoot -OutputDirectory $payloadOutDir -Version $Version -Arch $Arch -DesktopExePath $resolvedDesktopExe
+    $pkg = & $releasePkgScript -SourceRoot $repoRoot -OutputDirectory $payloadOutDir -Version $Version -Arch $targetArch -DesktopExePath $resolvedDesktopExe
     if (-not (Test-Path -LiteralPath $pkg.PackagePath -PathType Leaf)) {
         throw 'Failed to build embedded payload ZIP for Setup installer.'
     }
@@ -87,6 +92,9 @@ try {
     $sourceFiles = @(Get-ChildItem -LiteralPath $resolvedSourceDir -Filter '*.cs' -File | Sort-Object Name | ForEach-Object { $_.FullName })
     $compileRes = Invoke-WinExeCscCompile `
         -CscExe $compilerInfo.CscExe `
+        -CompilerDll $compilerInfo.CompilerDll `
+        -FxRoot $compilerInfo.FxRoot `
+        -Platform $targetArch `
         -OutputPath $resolvedOutput `
         -References $compilerInfo.References `
         -SourceFiles $sourceFiles `
@@ -98,10 +106,12 @@ try {
 
     [pscustomobject]@{
         Succeeded    = $true
-        Compiler     = $compilerInfo.CscExe
+        Compiler     = if ($compilerInfo.CompilerDll) { $compilerInfo.CompilerDll } else { $compilerInfo.CscExe }
         OutputPath   = $compileRes.OutputPath
         Version      = $Version
-        Arch         = $Arch
+        Arch         = $targetArch
+        Platform     = $targetArch
+        PeMachine    = $compileRes.PeMachine
         SizeBytes    = $compileRes.SizeBytes
         Sha256       = $compileRes.Sha256
         TargetType   = 'winexe (Zero-Console WPF Setup Wizard)'

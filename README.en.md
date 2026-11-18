@@ -7,7 +7,7 @@
   <p>Standalone Windows Desktop App + AI-Callable Agent Skill — 100% read-only by default, strictly never alters Windows OS itself</p>
   <p>
     <a href="https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest"><img src="https://img.shields.io/badge/Release-v0.1.0-3B82F6?style=flat-square" alt="Release v0.1.0" /></a>
-    <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078D4?style=flat-square" alt="Platform Windows 10/11 x64" />
+    <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64%20%7C%20ARM64-0078D4?style=flat-square" alt="Platform Windows 10/11 x64 | ARM64" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22C55E?style=flat-square" alt="License MIT" /></a>
     <a href="README.md"><img src="https://img.shields.io/badge/Language-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%20%7C%20English-16A34A?style=flat-square" alt="Language" /></a>
   </p>
@@ -56,14 +56,17 @@ After a Claude Code CLI or Claude Desktop account ban, normal uninstallation or 
 
 ## Quick Download & Verification (GitHub Releases)
 
-Download standardized `v0.1.0` (`x64`) Windows release artifacts directly from [GitHub Releases Latest](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest):
+Download standardized `v0.1.0` Windows (**x64** & **ARM64**) release artifacts directly from [GitHub Releases Latest](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest). **Both `portable.exe` and `setup.exe` embed the full [ClaudeCleanup.ps1](ClaudeCleanup.ps1) backend engine directly inside the assembly**: even when copied into a completely empty folder, the app verifies SHA-256 and extracts the core engine to `%LOCALAPPDATA%\Claude-Residual-ID-Cleaner\engine\<sha256-16>\` automatically.
 
-| Release Artifact | Best For | Footprint & Privileges | Download |
-| :--- | :--- | :--- | :--- |
-| **`Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe`** | **Windows Setup Wizard (Recommended)**: Creates Desktop & Start Menu shortcuts and registers clean Add/Remove Programs uninstall | Installs to `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner` by default (**no UAC required**) | [Download Setup Installer](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
-| **`Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe`** | **Portable Single-File Executable**: Zero installation, zero Add/Remove registry footprint, double-click ready | Runs from any local folder beside toolkit scripts or inside the bundle ZIP | [Download Portable .exe](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
-| **`Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip`** | **Full Portable Bundle**: Contains `Claude-Residual-ID-Cleaner.exe`, PowerShell backend, `skills/`, and documentation | Extract anywhere for full desktop, CLI, and cross-agent Skill usage | [Download Bundle ZIP](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
-| **`SHA256SUMS.txt`** | **Integrity Checksums**: Provides 64-hex SHA-256 hashes for all x64 release artifacts | Verify locally with PowerShell `Get-FileHash -Algorithm SHA256` | [View Checksums](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| Release Artifact | Arch | Best For | Footprint & Privileges | Download |
+| :--- | :--- | :--- | :--- | :--- |
+| **`Claude-Residual-ID-Cleaner-0.1.0-x64-setup.exe`** | Windows x64 | **Setup Wizard (Recommended)**: Creates Desktop & Start Menu shortcuts and registers clean Add/Remove uninstall | Installs to `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner` (**no UAC required**) | [Download x64 Setup](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-x64-portable.exe`** | Windows x64 | **100% Self-Contained Portable `.exe`**: Embedded backend engine, zero installation, runs from any empty folder | Extracts & verifies embedded engine under `%LOCALAPPDATA%\Claude-Residual-ID-Cleaner\engine\` | [Download x64 Portable](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-arm64-setup.exe`** | Windows ARM64 | **ARM64 Native Setup Wizard**: For Windows on ARM64 / Snapdragon devices (native PE `0xAA64`) | Installs to `%LOCALAPPDATA%\Programs\Claude-Residual-ID-Cleaner` (**no UAC required**) | [Download ARM64 Setup](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-arm64-portable.exe`** | Windows ARM64 | **ARM64 Native Portable `.exe`**: Self-contained native `0xAA64` executable with embedded backend | Extracts & verifies embedded engine under `%LOCALAPPDATA%\Claude-Residual-ID-Cleaner\engine\` | [Download ARM64 Portable](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-x64-bundle.zip`** | Windows x64 | **Full x64 Portable Bundle**: Contains `Claude-Residual-ID-Cleaner.exe`, PowerShell scripts, `skills/`, and docs | Extract anywhere for full desktop, CLI, and cross-agent Skill usage | [Download x64 Bundle](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`Claude-Residual-ID-Cleaner-0.1.0-arm64-bundle.zip`** | Windows ARM64 | **Full ARM64 Portable Bundle**: Contains native ARM64 `.exe`, PowerShell scripts, `skills/`, and docs | Extract anywhere for full ARM64 desktop, CLI, and cross-agent Skill usage | [Download ARM64 Bundle](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
+| **`SHA256SUMS.txt`** | All | **Integrity Checksums**: Provides 64-hex SHA-256 hashes for all 6 `x64` & `arm64` artifacts | Verify locally with PowerShell `Get-FileHash -Algorithm SHA256` | [View Checksums](https://github.com/YUCZ-43/Claude-Residual-ID-Cleaner/releases/latest) |
 
 ---
 
