@@ -389,7 +389,7 @@ try {
         Write-Warning "Desktop executable did not support --demo-cleaning directly; falling back to --demo-audit frame for Step 3: $($_.Exception.Message)"
         Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-audit --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png3`""
     }
-    Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-verified --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`" --capture-png `"$png4`""
+    Invoke-DesktopCapture -ExecutablePath $resolvedExe -ArgumentsLine "--demo-report --dry-run --language zh-CN --nav 1 --toolkit-root `"$repoRoot`" --capture-png `"$png4`""
 
     $stepBmps = @(
         (New-Object System.Drawing.Bitmap($png1)),
@@ -401,12 +401,12 @@ try {
 
     $targetWidth = 1120
     $targetHeight = 790
-    $stepLabels = @('1. 扫描面板', '2. 识别残余', '3. 实时清理', '4. 核验清零')
+    $stepLabels = @('1. 扫描面板', '2. 识别残余', '3. 实时清理', '4. 详情报告')
     $stepCaptions = @(
         '启动只读扫描面板 · 默认零写入、绝不改动 Windows 系统',
         '精准识别残余账号 UUID 与可清理缓存 · 严守安全红线',
         '实时流式清理进度 · 逐项状态徽章即时更新',
-        '独立核验清零完成 · 剩余可清理残留：0 项'
+        '清理完成详情报告 · 账号/组织 ID 残留：0（已彻底清除）'
     )
     $holdDelays = @(160, 180, 180, 200)
 

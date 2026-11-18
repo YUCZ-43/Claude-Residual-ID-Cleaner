@@ -72,6 +72,7 @@ try {
     $captures = @(
         @{ Name = 'ui-main-zh.png'; Args = "--dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`"" },
         @{ Name = 'ui-scan-results-zh.png'; Args = "--demo-audit --dry-run --language zh-CN --nav 0 --toolkit-root `"$repoRoot`"" },
+        @{ Name = 'ui-report-dialog-zh.png'; Args = "--demo-report --dry-run --language zh-CN --nav 1 --toolkit-root `"$repoRoot`"" },
         @{ Name = 'ui-main-en.png'; Args = "--demo-audit --dry-run --language en-US --nav 0 --toolkit-root `"$repoRoot`"" }
     )
 

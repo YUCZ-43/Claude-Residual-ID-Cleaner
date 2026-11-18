@@ -174,6 +174,29 @@ namespace ClaudeResidualIdCleaner
         public string StdErr;
     }
 
+    public sealed class CleanupExecutionReportItem
+    {
+        public string Id;
+        public string Kind;
+        public string Path;
+        public string Status;
+        public string Error;
+        public long SizeBytes;
+    }
+
+    public sealed class CleanupExecutionReportData
+    {
+        public string Policy;
+        public string Outcome;
+        public string PlanSha256;
+        public int CleanedCount;
+        public int LockedCount;
+        public int RemainingCleanableCount;
+        public int RemainingAccountIdCount;
+        public long FreedBytes;
+        public readonly List<CleanupExecutionReportItem> Items = new List<CleanupExecutionReportItem>();
+    }
+
     internal sealed class SelfTestReport
     {
         public bool AppInstantiated;
@@ -205,6 +228,9 @@ namespace ClaudeResidualIdCleaner
         public bool HasReportsView;
         public bool CleaningProgressVisible;
         public bool CompletionBannerVisible;
+        public bool HasStartupSplash;
+        public bool HasCleanupReportDialog;
+        public bool DemoReportDialogVerified;
     }
 
     public sealed class MainWindow : Window
@@ -218,6 +244,7 @@ namespace ClaudeResidualIdCleaner
         internal static readonly Brush BrushBorderSubtle = CreateBrush(50, 56, 66);     // #323842
         internal static readonly Brush BrushAccent = CreateBrush(59, 130, 246);         // #3B82F6
         internal static readonly Brush BrushAccentBright = CreateBrush(96, 165, 250);   // #60A5FA
+        internal static readonly Brush BrushSplashAccent = CreateBrush(55, 148, 255);   // #3794FF
         internal static readonly Brush BrushTealAction = CreateBrush(14, 116, 144);     // #0E7490
         internal static readonly Brush BrushDangerAction = CreateBrush(185, 28, 28);    // #B91C1C
         internal static readonly Brush BrushNeutralAction = CreateBrush(40, 44, 52);    // #282C34
@@ -283,6 +310,11 @@ namespace ClaudeResidualIdCleaner
         private int _lastCleanedCount;
         private int _lastLockedCount;
         private int _lastRemainingCount;
+        private int _lastRemainingAccountIdCount;
+        private long _lastFreedBytes;
+        private readonly Dictionary<string, long> _preCleanSizeByKey = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        private CleanupExecutionReportData _pendingExecutionReport;
+        private CleanupExecutionReportData _lastExecutionReport;
 
         private readonly ObservableCollection<ResidualGridRow> _allRows = new ObservableCollection<ResidualGridRow>();
         private readonly ObservableCollection<ResidualGridRow> _visibleRows = new ObservableCollection<ResidualGridRow>();
@@ -2835,6 +2867,19 @@ namespace ClaudeResidualIdCleaner
             }
         }
 
+        private static bool IsClaudeParentOrUserArtifactId(string itemId)
+        {
+            if (string.IsNullOrEmpty(itemId)) return false;
+            return string.Equals(itemId, "cli-home", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "cli-exe", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "cli-versions", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "cli-installer-cache", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "desktop-roaming", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(itemId, "desktop-local", StringComparison.OrdinalIgnoreCase) ||
+                   itemId.StartsWith("desktop-old-", StringComparison.OrdinalIgnoreCase) ||
+                   itemId.StartsWith("full-", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static void ClassifyNonReadyToneAndLabel(
             Dictionary<string, string> s,
             string itemId,
@@ -2844,17 +2889,21 @@ namespace ClaudeResidualIdCleaner
             out string tone,
             out string label)
         {
-            bool isOsBoundary =
-                string.Equals(decision, "Blocked", StringComparison.OrdinalIgnoreCase) ||
+            // Reserve OS Protected strictly for genuine Windows OS / hardware / non-Claude shared boundaries
+            bool isTrueOsBoundary =
                 string.Equals(itemId, "desktop-msix-data", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(itemId, "vscode-shared-obsolete", StringComparison.OrdinalIgnoreCase);
+                string.Equals(itemId, "vscode-shared-obsolete", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "appx-claude-query-blocked", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(itemId, "vscode-extensions-probe-blocked", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(policy, "ReadOnly", StringComparison.OrdinalIgnoreCase);
 
-            if (isOsBoundary)
+            if (isTrueOsBoundary)
             {
                 tone = "Protected";
                 label = s["ProtectedLabel"];
                 return;
             }
+
             bool requiresFullRemoval =
                 !string.Equals(activePolicy, "FullRemoval", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(policy, "FullRemoval", StringComparison.OrdinalIgnoreCase);
@@ -2864,6 +2913,7 @@ namespace ClaudeResidualIdCleaner
                 label = s["ExcludedLabel"];
                 return;
             }
+
             tone = "Review";
             label = s["ReviewLabel"];
         }
@@ -2950,6 +3000,8 @@ namespace ClaudeResidualIdCleaner
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-network", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Network", s["FoundLabel"], "Ready", "Ready", "[AccountData] Session cookies & network state", 2450112, false);
             AddDemoRow(true, true, "ClaudeDesktop", "AccountData", "desktop-logs", "Directory", "Claude Desktop", @"C:\Users\<USERNAME>\AppData\Local\Claude\logs", s["FoundLabel"], "Ready", "Ready", "[AccountData] Desktop diagnostic log files", 845312, false);
 
+            AddDemoRow(false, true, "ClaudeCode", "FullRemoval", "cli-home", "Directory", "Claude Code user data", @"C:\Users\<USERNAME>\.claude", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] Claude Code root folder including custom skills/commands (switch to FullRemoval)", 6420480, false);
+            AddDemoRow(false, true, "ClaudeDesktop", "FullRemoval", "desktop-roaming", "Directory", "Claude Desktop user data", @"C:\Users\<USERNAME>\AppData\Roaming\Claude", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] Claude Desktop Roaming folder (switch to FullRemoval)", 14280960, false);
             AddDemoRow(false, true, "ClaudeCode", "FullRemoval", "npm-claude-code", "NpmPackage", "npm Global Package", @"C:\Users\<USERNAME>\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] @anthropic-ai/claude-code package binary (switch to FullRemoval)", 38450120, false);
             AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "vscode-ext", "VsCodeExtension", "VS Code Extension", @"C:\Users\<USERNAME>\.vscode\extensions\anthropic.claude-code-2.1.40", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] anthropic.claude-code IDE extension (switch to FullRemoval)", 48210400, false);
             AddDemoRow(false, true, "VsCodeExtensions", "FullRemoval", "chrome-native-host", "RegistryKey", "Browser Native Host", @"HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.anthropic.claude_browser_extension", s["ExcludedLabel"], "Excluded", "Ready", "[FullRemoval] Exact HKCU Chrome NativeMessagingHosts key (switch to FullRemoval)", 0, false);
@@ -3149,12 +3201,70 @@ namespace ClaudeResidualIdCleaner
             return string.Format("{0:F2} GB", bytes / (1024.0 * 1024.0 * 1024.0));
         }
 
+        private CleanupExecutionReportData CreateDemoExecutionReportData()
+        {
+            var report = new CleanupExecutionReportData
+            {
+                Policy = "AccountData",
+                Outcome = "Succeeded",
+                PlanSha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                CleanedCount = 6,
+                LockedCount = 0,
+                RemainingCleanableCount = 0,
+                RemainingAccountIdCount = 0,
+                FreedBytes = 21845632L
+            };
+            report.Items.Add(new CleanupExecutionReportItem { Id = "cli-credentials", Kind = "File", Path = @"C:\Users\<USERNAME>\.claude\.credentials.json", Status = "Removed", SizeBytes = 4096L });
+            report.Items.Add(new CleanupExecutionReportItem { Id = "cli-global", Kind = "File", Path = @"C:\Users\<USERNAME>\.claude.json", Status = "Removed", SizeBytes = 12480L });
+            report.Items.Add(new CleanupExecutionReportItem { Id = "desktop-buddy-tokens", Kind = "File", Path = @"C:\Users\<USERNAME>\AppData\Roaming\Claude\buddy-tokens.json", Status = "Removed", SizeBytes = 2048L });
+            report.Items.Add(new CleanupExecutionReportItem { Id = "desktop-cache", Kind = "Directory", Path = @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Cache", Status = "Removed", SizeBytes = 18529600L });
+            report.Items.Add(new CleanupExecutionReportItem { Id = "desktop-network", Kind = "Directory", Path = @"C:\Users\<USERNAME>\AppData\Roaming\Claude\Network", Status = "Removed", SizeBytes = 2450112L });
+            report.Items.Add(new CleanupExecutionReportItem { Id = "desktop-logs", Kind = "Directory", Path = @"C:\Users\<USERNAME>\AppData\Local\Claude\logs", Status = "Removed", SizeBytes = 847296L });
+            return report;
+        }
+
+        public void ApplyDemoReportState(bool headlessOnly)
+        {
+            if (!_dryRun) return;
+            ApplyDemoVerifiedState();
+            _lastExecutionReport = CreateDemoExecutionReportData();
+            _lastFreedBytes = _lastExecutionReport.FreedBytes;
+            _lastRemainingAccountIdCount = 0;
+            SelectNavTab(1);
+            RefreshReportsView();
+            if (!headlessOnly)
+            {
+                AttachReportOverlayForCapture(_lastExecutionReport);
+            }
+        }
+
         internal SelfTestReport BuildSelfTestReport()
         {
             string initLang = _lang;
             string initTitle = _lblHeaderTitle.Text;
             string initPill = _lblSafetyPill.Text;
             bool initClean = _btnClean.IsEnabled;
+
+            bool hasSplash = false;
+            bool hasReportDlg = false;
+            bool demoRptVerified = false;
+            try
+            {
+                Window splash = CreateStartupSplashWindow(initLang, LoadMascotImageSource());
+                hasSplash = (splash != null && splash.WindowStyle == WindowStyle.None);
+                if (splash != null) splash.Close();
+            }
+            catch { hasSplash = false; }
+
+            try
+            {
+                CleanupExecutionReportData sampleRpt = _lastExecutionReport ?? CreateDemoExecutionReportData();
+                Window rptWin = CreateCleanupReportWindow(sampleRpt, initLang, null);
+                hasReportDlg = (rptWin != null && rptWin.Content != null);
+                demoRptVerified = hasReportDlg && sampleRpt.RemainingAccountIdCount == 0 && sampleRpt.CleanedCount > 0;
+                if (rptWin != null) rptWin.Close();
+            }
+            catch { hasReportDlg = false; }
 
             ToggleLanguage();
 
@@ -3188,7 +3298,10 @@ namespace ClaudeResidualIdCleaner
                 HasCompletionSummaryBanner = (_completionSummaryBanner != null && _lblCompletionTitle != null),
                 HasReportsView = (_reportsPanel != null),
                 CleaningProgressVisible = (_cleaningProgressCard != null && _cleaningProgressCard.Visibility == Visibility.Visible),
-                CompletionBannerVisible = (_completionSummaryBanner != null && _completionSummaryBanner.Visibility == Visibility.Visible)
+                CompletionBannerVisible = (_completionSummaryBanner != null && _completionSummaryBanner.Visibility == Visibility.Visible),
+                HasStartupSplash = hasSplash,
+                HasCleanupReportDialog = hasReportDlg,
+                DemoReportDialogVerified = demoRptVerified
             };
         }
 
@@ -3328,31 +3441,74 @@ namespace ClaudeResidualIdCleaner
             return string.Format(s["ClaudeRunningPromptBody"], procList);
         }
 
+        private static string MatchJsonFieldRegex(string block, string fieldName)
+        {
+            Match m = Regex.Match(block, "\"" + fieldName + "\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
+            if (!m.Success) return string.Empty;
+            try { return Regex.Unescape(m.Groups[1].Value); }
+            catch { return m.Groups[1].Value; }
+        }
+
+        private static List<CleanupExecutionReportItem> ParseApplyResultsFromJson(string jsonStdOut, out string outcome)
+        {
+            outcome = string.Empty;
+            var parsed = new List<CleanupExecutionReportItem>();
+            if (string.IsNullOrWhiteSpace(jsonStdOut)) return parsed;
+
+            Dictionary<string, object> doc = null;
+            try { doc = ParseJsonObject(jsonStdOut); } catch { doc = null; }
+
+            if (doc != null)
+            {
+                outcome = GetDictString(doc, "Outcome");
+                object resObj;
+                if (doc.TryGetValue("Results", out resObj) && resObj is ArrayList)
+                {
+                    var items = (ArrayList)resObj;
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        var r = items[i] as Dictionary<string, object>;
+                        if (r == null) continue;
+                        parsed.Add(new CleanupExecutionReportItem
+                        {
+                            Id = GetDictString(r, "Id"),
+                            Kind = GetDictString(r, "Kind"),
+                            Path = StripAnsiEscapeCodes(GetDictString(r, "Path")),
+                            Status = GetDictString(r, "Status"),
+                            Error = StripAnsiEscapeCodes(GetDictString(r, "Error"))
+                        });
+                    }
+                }
+                return parsed;
+            }
+
+            Match om = Regex.Match(jsonStdOut, "\"Outcome\"\\s*:\\s*\"([^\"]+)\"", RegexOptions.IgnoreCase);
+            if (om.Success) outcome = om.Groups[1].Value;
+
+            MatchCollection entryMatches = Regex.Matches(jsonStdOut, "\\{[^{}]*\"Status\"\\s*:\\s*\"([^\"]+)\"[^{}]*\\}", RegexOptions.Singleline);
+            for (int i = 0; i < entryMatches.Count; i++)
+            {
+                string block = entryMatches[i].Value;
+                parsed.Add(new CleanupExecutionReportItem
+                {
+                    Id = StripAnsiEscapeCodes(MatchJsonFieldRegex(block, "Id")),
+                    Kind = StripAnsiEscapeCodes(MatchJsonFieldRegex(block, "Kind")),
+                    Path = StripAnsiEscapeCodes(MatchJsonFieldRegex(block, "Path")),
+                    Status = entryMatches[i].Groups[1].Value,
+                    Error = StripAnsiEscapeCodes(MatchJsonFieldRegex(block, "Error"))
+                });
+            }
+            return parsed;
+        }
+
         public static string FormatPartialFailureMessage(string jsonStdOut, string rawStdErr, string lang, out bool isPartialFailure)
         {
             isPartialFailure = false;
             var s = Localization.GetStrings(lang);
             string cleanErr = StripAnsiEscapeCodes(rawStdErr);
 
-            Dictionary<string, object> doc = null;
-            if (!string.IsNullOrWhiteSpace(jsonStdOut))
-            {
-                try
-                {
-                    doc = ParseJsonObject(jsonStdOut);
-                }
-                catch
-                {
-                    doc = null;
-                }
-            }
-
-            string outcome = (doc != null) ? GetDictString(doc, "Outcome") : string.Empty;
-            if (doc == null && !string.IsNullOrWhiteSpace(jsonStdOut))
-            {
-                Match om = Regex.Match(jsonStdOut, "\"Outcome\"\\s*:\\s*\"(PartialFailure|Failed)\"", RegexOptions.IgnoreCase);
-                if (om.Success) outcome = om.Groups[1].Value;
-            }
+            string outcome;
+            List<CleanupExecutionReportItem> parsedItems = ParseApplyResultsFromJson(jsonStdOut, out outcome);
             bool hasOutcomePartial =
                 string.Equals(outcome, "PartialFailure", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(outcome, "Failed", StringComparison.OrdinalIgnoreCase);
@@ -3367,56 +3523,18 @@ namespace ClaudeResidualIdCleaner
             var cleanedLines = new List<string>();
             var lockedLines = new List<string>();
 
-            object resObj;
-            if (doc != null && doc.TryGetValue("Results", out resObj) && resObj is ArrayList)
+            for (int i = 0; i < parsedItems.Count; i++)
             {
-                var items = (ArrayList)resObj;
-                for (int i = 0; i < items.Count; i++)
+                CleanupExecutionReportItem item = parsedItems[i];
+                if (string.Equals(item.Status, "Removed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(item.Path))
                 {
-                    var r = items[i] as Dictionary<string, object>;
-                    if (r == null) continue;
-                    string status = GetDictString(r, "Status");
-                    string path = StripAnsiEscapeCodes(GetDictString(r, "Path"));
-                    string err = StripAnsiEscapeCodes(GetDictString(r, "Error"));
-                    if (string.Equals(status, "Removed", StringComparison.OrdinalIgnoreCase))
-                    {
-                        cleanedLines.Add(" - " + path);
-                    }
-                    else if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase) ||
-                             string.Equals(status, "NotExecuted", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string suffix = string.IsNullOrEmpty(err) ? string.Empty : " (" + err + ")";
-                        lockedLines.Add(" - " + path + suffix);
-                    }
+                    cleanedLines.Add(" - " + item.Path);
                 }
-            }
-            else if (doc == null && !string.IsNullOrWhiteSpace(jsonStdOut))
-            {
-                Match om = Regex.Match(jsonStdOut, "\"Outcome\"\\s*:\\s*\"(PartialFailure|Failed)\"", RegexOptions.IgnoreCase);
-                if (!om.Success && cleanErr.IndexOf("PartialFailure", StringComparison.OrdinalIgnoreCase) < 0)
+                else if ((string.Equals(item.Status, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(item.Status, "NotExecuted", StringComparison.OrdinalIgnoreCase)) && !string.IsNullOrEmpty(item.Path))
                 {
-                    return string.Empty;
-                }
-                isPartialFailure = true;
-                MatchCollection entryMatches = Regex.Matches(jsonStdOut, "\\{[^{}]*\"Status\"\\s*:\\s*\"([^\"]+)\"[^{}]*\\}", RegexOptions.Singleline);
-                for (int i = 0; i < entryMatches.Count; i++)
-                {
-                    string block = entryMatches[i].Value;
-                    string status = entryMatches[i].Groups[1].Value;
-                    Match pm = Regex.Match(block, "\"Path\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
-                    Match em = Regex.Match(block, "\"Error\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
-                    string path = pm.Success ? Regex.Unescape(pm.Groups[1].Value) : string.Empty;
-                    string err = em.Success ? Regex.Unescape(em.Groups[1].Value) : string.Empty;
-                    if (string.Equals(status, "Removed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(path))
-                    {
-                        cleanedLines.Add(" - " + path);
-                    }
-                    else if ((string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase) ||
-                              string.Equals(status, "NotExecuted", StringComparison.OrdinalIgnoreCase)) && !string.IsNullOrEmpty(path))
-                    {
-                        string suffix = string.IsNullOrEmpty(err) ? string.Empty : " (" + err + ")";
-                        lockedLines.Add(" - " + path + suffix);
-                    }
+                    string suffix = string.IsNullOrEmpty(item.Error) ? string.Empty : " (" + item.Error + ")";
+                    lockedLines.Add(" - " + item.Path + suffix);
                 }
             }
 
@@ -3428,6 +3546,478 @@ namespace ClaudeResidualIdCleaner
 
             int remainingCount = (lockedLines.Count > 0) ? lockedLines.Count : 1;
             return string.Format(s["PartialFailureBody"], cleanedLines.Count, remainingCount, cleanedText, lockedText);
+        }
+
+        public static Window CreateStartupSplashWindow(string lang, ImageSource iconSource)
+        {
+            var s = Localization.GetStrings(string.IsNullOrEmpty(lang) ? "zh-CN" : lang);
+            var win = new Window
+            {
+                Title = s["BrandName"],
+                Width = 408,
+                Height = 216,
+                WindowStyle = WindowStyle.None,
+                ResizeMode = ResizeMode.NoResize,
+                AllowsTransparency = true,
+                Background = Brushes.Transparent,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                ShowInTaskbar = false,
+                Topmost = true
+            };
+
+            var card = new Border
+            {
+                Background = BrushBgOuter,
+                BorderBrush = BrushSplashAccent,
+                BorderThickness = new Thickness(1.5),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(26, 22, 26, 22),
+                Margin = new Thickness(8)
+            };
+
+            var stack = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            if (iconSource != null)
+            {
+                stack.Children.Add(new Image
+                {
+                    Source = iconSource,
+                    Width = 52,
+                    Height = 52,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 0, 0, 12)
+                });
+            }
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = "Claude Residual ID Cleaner",
+                Foreground = BrushTextPrimary,
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+
+            stack.Children.Add(new TextBlock
+            {
+                Text = s["SplashSubtitle"],
+                Foreground = BrushTextSecondary,
+                FontSize = 12,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 5, 0, 16)
+            });
+
+            stack.Children.Add(new ProgressBar
+            {
+                Height = 5,
+                IsIndeterminate = true,
+                Background = BrushBgElevated,
+                Foreground = BrushSplashAccent,
+                BorderThickness = new Thickness(0)
+            });
+
+            card.Child = stack;
+            win.Content = card;
+            return win;
+        }
+
+        private static string FormatSpaceMb(long bytes)
+        {
+            if (bytes <= 0) return "0.00 MB";
+            double mb = bytes / (1024.0 * 1024.0);
+            if (mb < 0.01) return "< 0.01 MB";
+            return string.Format("{0:F2} MB", mb);
+        }
+
+        public static CleanupExecutionReportData BuildExecutionReportData(
+            string policy,
+            string planSha,
+            string applyStdOut,
+            string applyStdErr,
+            Dictionary<string, long> preCleanSizes)
+        {
+            var report = new CleanupExecutionReportData
+            {
+                Policy = policy ?? "AccountData",
+                Outcome = "Failed",
+                PlanSha256 = planSha ?? string.Empty
+            };
+
+            string outcome;
+            List<CleanupExecutionReportItem> parsed = ParseApplyResultsFromJson(applyStdOut, out outcome);
+            if (!string.IsNullOrEmpty(outcome)) report.Outcome = outcome;
+
+            if (parsed.Count > 0)
+            {
+                for (int i = 0; i < parsed.Count; i++)
+                {
+                    CleanupExecutionReportItem entry = parsed[i];
+                    long sz = 0;
+                    if (preCleanSizes != null)
+                    {
+                        if (!string.IsNullOrEmpty(entry.Id) && preCleanSizes.ContainsKey(entry.Id)) sz = preCleanSizes[entry.Id];
+                        else if (!string.IsNullOrEmpty(entry.Path) && preCleanSizes.ContainsKey(entry.Path)) sz = preCleanSizes[entry.Path];
+                    }
+                    entry.SizeBytes = sz;
+                    report.Items.Add(entry);
+                    if (string.Equals(entry.Status, "Removed", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(entry.Status, "AlreadyAbsent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        report.CleanedCount++;
+                        if (string.Equals(entry.Status, "Removed", StringComparison.OrdinalIgnoreCase) && sz > 0)
+                        {
+                            report.FreedBytes += sz;
+                        }
+                    }
+                    else if (string.Equals(entry.Status, "Failed", StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(entry.Status, "NotExecuted", StringComparison.OrdinalIgnoreCase))
+                    {
+                        report.LockedCount++;
+                    }
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(applyStdErr))
+            {
+                report.LockedCount = 1;
+                report.Items.Add(new CleanupExecutionReportItem
+                {
+                    Id = "apply-error",
+                    Kind = "Engine",
+                    Path = policy ?? "AccountData",
+                    Status = "Failed",
+                    Error = StripAnsiEscapeCodes(applyStdErr).Trim()
+                });
+            }
+
+            return report;
+        }
+
+        public static string FormatExecutionReportMarkdown(CleanupExecutionReportData report, string lang)
+        {
+            var s = Localization.GetStrings(string.IsNullOrEmpty(lang) ? "zh-CN" : lang);
+            bool isZh = string.Equals(lang, "zh-CN", StringComparison.OrdinalIgnoreCase);
+            var sb = new StringBuilder();
+            sb.AppendLine("# " + s["ExecReportTitle"]);
+            sb.AppendLine();
+            sb.AppendLine("- Policy: " + report.Policy);
+            sb.AppendLine("- Outcome: " + report.Outcome);
+            sb.AppendLine("- " + s["ExecReportStatCleaned"] + ": " + report.CleanedCount);
+            sb.AppendLine("- " + s["ExecReportStatFreed"] + ": " + FormatSpaceMb(report.FreedBytes));
+            sb.AppendLine("- " + s["ExecReportStatLocked"] + ": " + report.LockedCount);
+            sb.AppendLine("- Account / Org ID: " + (report.RemainingAccountIdCount == 0
+                ? s["ExecReportAccountCleared"]
+                : string.Format(s["ExecReportAccountRemaining"], report.RemainingAccountIdCount)));
+            if (!string.IsNullOrEmpty(report.PlanSha256))
+            {
+                sb.AppendLine("- Plan SHA-256: `" + report.PlanSha256 + "`");
+            }
+            sb.AppendLine();
+
+            var cleaned = new List<string>();
+            var locked = new List<string>();
+            for (int i = 0; i < report.Items.Count; i++)
+            {
+                CleanupExecutionReportItem item = report.Items[i];
+                if (string.Equals(item.Status, "Removed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Status, "AlreadyAbsent", StringComparison.OrdinalIgnoreCase))
+                {
+                    string szSuffix = item.SizeBytes > 0 ? (" (" + FormatSpaceMb(item.SizeBytes) + ")") : string.Empty;
+                    cleaned.Add(string.Format("- `[{0}]` {1}{2}", item.Id, item.Path, szSuffix));
+                }
+                else
+                {
+                    string errSuffix = string.IsNullOrEmpty(item.Error) ? string.Empty : (" — " + item.Error);
+                    locked.Add(string.Format("- `[{0}]` {1}{2}", item.Id, item.Path, errSuffix));
+                }
+            }
+
+            sb.AppendLine("## " + string.Format(s["ExecReportCleanedSection"], cleaned.Count));
+            if (cleaned.Count == 0) sb.AppendLine("- " + s["ExecReportNoneCleaned"]);
+            else sb.AppendLine(string.Join("\r\n", cleaned.ToArray()));
+            sb.AppendLine();
+
+            sb.AppendLine("## " + string.Format(s["ExecReportLockedSection"], locked.Count));
+            if (locked.Count == 0)
+            {
+                sb.AppendLine("- " + s["ExecReportNoneLocked"]);
+            }
+            else
+            {
+                sb.AppendLine(string.Join("\r\n", locked.ToArray()));
+                sb.AppendLine();
+                sb.AppendLine("> " + (isZh ? s["ExecReportLockedAdvice"] : s["ExecReportLockedAdvice"]));
+            }
+            return sb.ToString();
+        }
+
+        private static Border BuildReportMetricTile(string title, string value, Brush valueBrush)
+        {
+            var stack = new StackPanel { Orientation = Orientation.Vertical };
+            stack.Children.Add(new TextBlock { Text = title, Foreground = BrushTextSecondary, FontSize = 11.5 });
+            stack.Children.Add(new TextBlock { Text = value, Foreground = valueBrush, FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 4, 0, 0) });
+            return new Border
+            {
+                Background = BrushBgCard,
+                BorderBrush = BrushBorderSubtle,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 9, 12, 9),
+                Margin = new Thickness(4, 0, 4, 0),
+                Child = stack
+            };
+        }
+
+        private static Border BuildReportItemListBox(string headerText, Brush accentBrush, Brush bgBrush, List<string> lines, string adviceText)
+        {
+            var stack = new StackPanel { Orientation = Orientation.Vertical };
+            stack.Children.Add(new TextBlock
+            {
+                Text = headerText,
+                Foreground = accentBrush,
+                FontSize = 12.5,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 0, 0, 6)
+            });
+
+            var bodyStack = new StackPanel { Orientation = Orientation.Vertical };
+            for (int i = 0; i < lines.Count; i++)
+            {
+                bodyStack.Children.Add(new TextBlock
+                {
+                    Text = lines[i],
+                    Foreground = BrushTextPrimary,
+                    FontFamily = new FontFamily("Consolas, Microsoft YaHei UI"),
+                    FontSize = 11.5,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 2, 0, 2)
+                });
+            }
+            if (!string.IsNullOrEmpty(adviceText))
+            {
+                bodyStack.Children.Add(new TextBlock
+                {
+                    Text = adviceText,
+                    Foreground = BrushBadgeReadyFg,
+                    FontSize = 11.5,
+                    FontWeight = FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 6, 0, 0)
+                });
+            }
+            stack.Children.Add(bodyStack);
+
+            return new Border
+            {
+                Background = bgBrush,
+                BorderBrush = accentBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 10, 12, 10),
+                Margin = new Thickness(0, 0, 0, 10),
+                Child = stack
+            };
+        }
+
+        private static Border BuildExecutionReportCard(
+            CleanupExecutionReportData report,
+            string lang,
+            Action onClose,
+            Action onExport)
+        {
+            var s = Localization.GetStrings(string.IsNullOrEmpty(lang) ? "zh-CN" : lang);
+            var outer = new Border
+            {
+                Background = BrushBgOuter,
+                BorderBrush = BrushSplashAccent,
+                BorderThickness = new Thickness(1.5),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(20, 18, 20, 18),
+                Width = 740,
+                MaxHeight = 620
+            };
+
+            var root = new Grid();
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            var headStack = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 0, 0, 10) };
+            headStack.Children.Add(new TextBlock { Text = s["ExecReportTitle"], Foreground = BrushTextPrimary, FontSize = 17, FontWeight = FontWeights.Bold });
+            headStack.Children.Add(new TextBlock { Text = s["ExecReportSubtitle"], Foreground = BrushTextSecondary, FontSize = 12, Margin = new Thickness(0, 3, 0, 0) });
+            Grid.SetRow(headStack, 0);
+            root.Children.Add(headStack);
+
+            bool idZero = (report.RemainingAccountIdCount == 0);
+            var idBadge = new Border
+            {
+                Background = idZero ? BrushSafetyBg : BrushBadgeReadyBg,
+                BorderBrush = idZero ? BrushSafetyBorder : BrushBadgeReadyBorder,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 8, 12, 8),
+                Margin = new Thickness(0, 0, 0, 10),
+                Child = new TextBlock
+                {
+                    Text = idZero ? s["ExecReportAccountCleared"] : string.Format(s["ExecReportAccountRemaining"], report.RemainingAccountIdCount),
+                    Foreground = idZero ? BrushSafetyFg : BrushBadgeReadyFg,
+                    FontSize = 13,
+                    FontWeight = FontWeights.Bold
+                }
+            };
+            Grid.SetRow(idBadge, 1);
+            root.Children.Add(idBadge);
+
+            var metricsGrid = new Grid { Margin = new Thickness(-4, 0, -4, 12) };
+            for (int c = 0; c < 3; c++) metricsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Border t1 = BuildReportMetricTile(s["ExecReportStatCleaned"], report.CleanedCount.ToString(), BrushSafetyFg);
+            Border t2 = BuildReportMetricTile(s["ExecReportStatFreed"], FormatSpaceMb(report.FreedBytes), BrushAccentBright);
+            Border t3 = BuildReportMetricTile(s["ExecReportStatLocked"], report.LockedCount.ToString(), report.LockedCount > 0 ? BrushBadgeReadyFg : BrushTextSecondary);
+            Grid.SetColumn(t1, 0); Grid.SetColumn(t2, 1); Grid.SetColumn(t3, 2);
+            metricsGrid.Children.Add(t1); metricsGrid.Children.Add(t2); metricsGrid.Children.Add(t3);
+            Grid.SetRow(metricsGrid, 2);
+            root.Children.Add(metricsGrid);
+
+            var cleanedLines = new List<string>();
+            var lockedLines = new List<string>();
+            for (int i = 0; i < report.Items.Count; i++)
+            {
+                CleanupExecutionReportItem item = report.Items[i];
+                if (string.Equals(item.Status, "Removed", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Status, "AlreadyAbsent", StringComparison.OrdinalIgnoreCase))
+                {
+                    string sz = item.SizeBytes > 0 ? ("  (" + FormatSpaceMb(item.SizeBytes) + ")") : string.Empty;
+                    cleanedLines.Add("[" + item.Id + "] " + item.Path + sz);
+                }
+                else
+                {
+                    string err = string.IsNullOrEmpty(item.Error) ? string.Empty : (" (" + item.Error + ")");
+                    lockedLines.Add("[" + item.Id + "] " + item.Path + err);
+                }
+            }
+
+            var listScroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 290, Margin = new Thickness(0, 0, 0, 12) };
+            var listStack = new StackPanel { Orientation = Orientation.Vertical };
+            var cleanDisplay = (cleanedLines.Count > 0) ? cleanedLines : new List<string>(new string[] { s["ExecReportNoneCleaned"] });
+            var lockDisplay = (lockedLines.Count > 0) ? lockedLines : new List<string>(new string[] { s["ExecReportNoneLocked"] });
+
+            listStack.Children.Add(BuildReportItemListBox(
+                string.Format(s["ExecReportCleanedSection"], cleanedLines.Count),
+                BrushSafetyBorder,
+                BrushSafetyBg,
+                cleanDisplay,
+                null));
+            listStack.Children.Add(BuildReportItemListBox(
+                string.Format(s["ExecReportLockedSection"], lockedLines.Count),
+                lockedLines.Count > 0 ? BrushBadgeReadyBorder : BrushBorderSubtle,
+                lockedLines.Count > 0 ? BrushBadgeReadyBg : BrushBgCard,
+                lockDisplay,
+                lockedLines.Count > 0 ? s["ExecReportLockedAdvice"] : null));
+            listScroll.Content = listStack;
+            Grid.SetRow(listScroll, 3);
+            root.Children.Add(listScroll);
+
+            var footerActions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var btnCopy = CreateActionButton(BrushBgElevated, BrushBorderSubtle, BrushTextPrimary);
+            btnCopy.Content = s["ExecReportBtnCopy"];
+            btnCopy.Margin = new Thickness(0, 0, 8, 0);
+            btnCopy.Click += delegate
+            {
+                try
+                {
+                    Clipboard.SetText(FormatExecutionReportMarkdown(report, lang));
+                    btnCopy.Content = s["ExecReportBtnCopied"];
+                }
+                catch { }
+            };
+
+            var btnExport = CreateActionButton(BrushAccent, BrushAccentBright, Brushes.White);
+            btnExport.Content = s["ExecReportBtnExport"];
+            btnExport.Margin = new Thickness(0, 0, 8, 0);
+            if (onExport != null) btnExport.Click += delegate { onExport(); };
+
+            var btnClose = CreateActionButton(BrushSafetyAction, BrushSafetyBorder, Brushes.White);
+            btnClose.Content = s["ExecReportBtnClose"];
+            btnClose.IsCancel = true;
+            if (onClose != null) btnClose.Click += delegate { onClose(); };
+
+            footerActions.Children.Add(btnCopy);
+            footerActions.Children.Add(btnExport);
+            footerActions.Children.Add(btnClose);
+            Grid.SetRow(footerActions, 4);
+            root.Children.Add(footerActions);
+
+            outer.Child = root;
+            return outer;
+        }
+
+        public static Window CreateCleanupReportWindow(CleanupExecutionReportData report, string lang, Action onExport)
+        {
+            var s = Localization.GetStrings(string.IsNullOrEmpty(lang) ? "zh-CN" : lang);
+            var dlg = new Window
+            {
+                Title = s["ExecReportTitle"],
+                Width = 780,
+                Height = 640,
+                WindowStyle = WindowStyle.None,
+                ResizeMode = ResizeMode.NoResize,
+                AllowsTransparency = true,
+                Background = Brushes.Transparent,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false
+            };
+            dlg.Content = BuildExecutionReportCard(report, lang, delegate { dlg.Close(); }, onExport);
+            return dlg;
+        }
+
+        private void ExportExecutionReportFile(CleanupExecutionReportData report)
+        {
+            if (report == null) return;
+            var s = Localization.GetStrings(_lang);
+            var saveDlg = new SaveFileDialog
+            {
+                Title = s["ExecReportExportTitle"],
+                Filter = s["SaveDialogFilter"],
+                FileName = "CLEANUP-EXECUTION-REPORT-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".md",
+                InitialDirectory = (!string.IsNullOrEmpty(_toolkitRoot) && Directory.Exists(_toolkitRoot))
+                    ? _toolkitRoot
+                    : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+            };
+            if (saveDlg.ShowDialog(this) != true) return;
+            File.WriteAllText(saveDlg.FileName, FormatExecutionReportMarkdown(report, _lang), new UTF8Encoding(false));
+            PromptOpenExportedAudit(saveDlg.FileName, s);
+        }
+
+        private void ShowCleanupReportDialog(CleanupExecutionReportData report)
+        {
+            if (report == null) return;
+            Window dlg = CreateCleanupReportWindow(report, _lang, delegate { ExportExecutionReportFile(report); });
+            dlg.Owner = this;
+            dlg.ShowDialog();
+        }
+
+        private void AttachReportOverlayForCapture(CleanupExecutionReportData report)
+        {
+            if (report == null) return;
+            var backdrop = new Grid { Background = new SolidColorBrush(Color.FromArgb(170, 10, 12, 16)) };
+            Border card = BuildExecutionReportCard(report, _lang, null, null);
+            card.HorizontalAlignment = HorizontalAlignment.Center;
+            card.VerticalAlignment = VerticalAlignment.Center;
+            backdrop.Children.Add(card);
+
+            var existingContent = Content as UIElement;
+            if (existingContent == null) return;
+            Content = null;
+            var host = new Grid();
+            host.Children.Add(existingContent);
+            host.Children.Add(backdrop);
+            Content = host;
         }
 
         public static string TranslateFriendlyBackendError(string rawError, string lang, out bool isProcessWarning, out string customTitle)
@@ -4098,6 +4688,19 @@ namespace ClaudeResidualIdCleaner
             _lastCleanedCount = 0;
             _lastLockedCount = 0;
             _lastRemainingCount = 0;
+            _lastFreedBytes = 0;
+            _pendingExecutionReport = null;
+            _preCleanSizeByKey.Clear();
+            for (int i = 0; i < _allRows.Count; i++)
+            {
+                ResidualGridRow r = _allRows[i];
+                if (r.SizeBytes > 0)
+                {
+                    if (!string.IsNullOrEmpty(r.ItemId)) _preCleanSizeByKey[r.ItemId] = r.SizeBytes;
+                    if (!string.IsNullOrEmpty(r.PathOrPackage)) _preCleanSizeByKey[r.PathOrPackage] = r.SizeBytes;
+                }
+            }
+
             _showCompletionBanner = false;
             _cleaningInProgress = true;
             _cleaningCurrentIndex = 0;
@@ -4113,9 +4716,10 @@ namespace ClaudeResidualIdCleaner
             _lblStatusBar.Text = s["StatusApplying"];
             AppendLog("User confirmed SHA256=" + _planSha256 + ". Executing ClaudeCleanup.ps1 -Apply -EmitProgress" + (closeRunningProcesses ? " -CloseRunningProcesses" : string.Empty) + "...");
 
+            string usedPlanSha = _planSha256;
             var applyArgs = new List<string>(new string[]
             {
-                "-Apply", "-Policy", policy, "-ApprovedManifestSha256", _planSha256,
+                "-Apply", "-Policy", policy, "-ApprovedManifestSha256", usedPlanSha,
                 "-Language", _lang, "-OutputFormat", "Json", "-EmitProgress", "-Confirm:$false"
             });
             if (closeRunningProcesses)
@@ -4128,47 +4732,43 @@ namespace ClaudeResidualIdCleaner
                 _cleaningInProgress = false;
                 UpdateCountsFromApplyJson(applyRes.StdOut);
 
-                if (applyRes.ExitCode != 0)
+                if (applyRes.ExitCode != 0 && !closeRunningProcesses && IsClaudeRunningError(applyRes.StdErr))
                 {
-                    if (!closeRunningProcesses && IsClaudeRunningError(applyRes.StdErr))
+                    UpdateProgressAndCompletionBanners();
+                    if (ConfirmCloseRunningClaudeProcesses(applyRes.StdErr))
                     {
-                        UpdateProgressAndCompletionBanners();
-                        if (ConfirmCloseRunningClaudeProcesses(applyRes.StdErr))
-                        {
-                            AppendLog("User authorized closing running Claude processes; retrying Apply...");
-                            ExecuteCleanApply(policy, true, expectedTotal);
-                        }
-                        else
-                        {
-                            AppendLog("Cleanup cancelled: user declined closing running Claude processes.");
-                        }
-                        return;
+                        AppendLog("User authorized closing running Claude processes; retrying Apply...");
+                        ExecuteCleanApply(policy, true, expectedTotal);
                     }
-                    bool isPartialFailure;
-                    string partialMsg = FormatPartialFailureMessage(applyRes.StdOut, applyRes.StdErr, _lang, out isPartialFailure);
-                    if (isPartialFailure)
+                    else
                     {
-                        _hasPlan = false;
-                        _readyCount = 0;
-                        _planSha256 = string.Empty;
-                        UpdatePlanGateState();
-                        UpdateProgressAndCompletionBanners();
-                        AppendLog("[WARN] Partial cleanup completed (some files locked); invoking Verify...");
-                        MessageBox.Show(this, partialMsg, s["PartialFailureTitle"], MessageBoxButton.OK, MessageBoxImage.Warning);
-                        RunVerifyInternal(true);
-                        return;
+                        AppendLog("Cleanup cancelled: user declined closing running Claude processes.");
                     }
+                    return;
+                }
+
+                bool isPartialFailure;
+                FormatPartialFailureMessage(applyRes.StdOut, applyRes.StdErr, _lang, out isPartialFailure);
+                if (applyRes.ExitCode != 0 && !isPartialFailure)
+                {
                     UpdateProgressAndCompletionBanners();
                     ShowBackendErrorDialog("[ERROR] Cleanup exited " + applyRes.ExitCode + ": ", applyRes.StdErr);
                     return;
                 }
+
+                _pendingExecutionReport = BuildExecutionReportData(policy, usedPlanSha, applyRes.StdOut, applyRes.StdErr, _preCleanSizeByKey);
+                _lastCleanedCount = _pendingExecutionReport.CleanedCount;
+                _lastLockedCount = _pendingExecutionReport.LockedCount;
+                _lastFreedBytes = _pendingExecutionReport.FreedBytes;
 
                 _hasPlan = false;
                 _readyCount = 0;
                 _planSha256 = string.Empty;
                 UpdatePlanGateState();
                 UpdateProgressAndCompletionBanners();
-                AppendLog("Cleanup complete; invoking automatic Verify...");
+                AppendLog(isPartialFailure
+                    ? "[WARN] Partial cleanup completed (some files locked); invoking Verify..."
+                    : "Cleanup complete; invoking automatic Verify...");
                 RunVerifyInternal(true);
             });
         }
@@ -4242,6 +4842,7 @@ namespace ClaudeResidualIdCleaner
                 object verObj;
                 int checkedCount = 0;
                 int remainingCleanable = 0;
+                int remainingAccountIds = _accountIdRecords.Count;
                 string activePolicy = GetActivePolicy();
 
                 if (doc.TryGetValue("Verify", out verObj) && verObj is Dictionary<string, object>)
@@ -4270,9 +4871,31 @@ namespace ClaudeResidualIdCleaner
                             }
                         }
                     }
+                    object remIdsObj;
+                    if (v.TryGetValue("RemainingAccountIds", out remIdsObj) && remIdsObj is ArrayList)
+                    {
+                        var remList = (ArrayList)remIdsObj;
+                        remainingAccountIds = remList.Count;
+                        _accountIdRecords.Clear();
+                        for (int i = 0; i < remList.Count; i++)
+                        {
+                            var idDict = remList[i] as Dictionary<string, object>;
+                            if (idDict == null) continue;
+                            _accountIdRecords.Add(new ResidualAccountIdRecord
+                            {
+                                Source = StripAnsiEscapeCodes(GetDictString(idDict, "Source")),
+                                IdType = StripAnsiEscapeCodes(GetDictString(idDict, "IdType")),
+                                Field = StripAnsiEscapeCodes(GetDictString(idDict, "Field")),
+                                Value = StripAnsiEscapeCodes(GetDictString(idDict, "Value")),
+                                ConfigPath = StripAnsiEscapeCodes(GetDictString(idDict, "ConfigPath"))
+                            });
+                        }
+                        UpdateAccountIdCard();
+                    }
                 }
 
                 _lastRemainingCount = remainingCleanable;
+                _lastRemainingAccountIdCount = remainingAccountIds;
                 if (fromCleanup || _lastCleanedCount > 0)
                 {
                     _showCompletionBanner = true;
@@ -4281,13 +4904,52 @@ namespace ClaudeResidualIdCleaner
 
                 UpdateMetricCards();
                 UpdatePlanGateState();
-                if (_activeNavIndex == 1)
+                _lblStatusBar.Text = string.Format(s["StatusVerified"], checkedCount, remainingCleanable);
+                AppendLog(string.Format("Verify finished: checked={0}, remaining cleanable={1}, remaining IDs={2}.", checkedCount, remainingCleanable, remainingAccountIds));
+
+                if (fromCleanup && _pendingExecutionReport != null)
+                {
+                    var resultById = new Dictionary<string, CleanupExecutionReportItem>(StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < _pendingExecutionReport.Items.Count; i++)
+                    {
+                        var it = _pendingExecutionReport.Items[i];
+                        if (!string.IsNullOrEmpty(it.Id)) resultById[it.Id] = it;
+                    }
+                    for (int i = 0; i < _allRows.Count; i++)
+                    {
+                        ResidualGridRow row = _allRows[i];
+                        CleanupExecutionReportItem rItem;
+                        if (string.IsNullOrEmpty(row.ItemId) || !resultById.TryGetValue(row.ItemId, out rItem)) continue;
+                        if (string.Equals(rItem.Status, "Removed", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(rItem.Status, "AlreadyAbsent", StringComparison.OrdinalIgnoreCase))
+                        {
+                            row.StatusTone = "Clean";
+                            row.IsClearedItem = true;
+                            row.Status = s["RowClearedLabel"];
+                            row.Selected = false;
+                            row.CanSelect = false;
+                            row.Details = "[VerifiedAbsent] Removed cleanly via Win32 handle-bound deletion";
+                        }
+                        else if (string.Equals(rItem.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+                        {
+                            row.StatusTone = "Locked";
+                            row.Status = s["RowLockedLabel"];
+                            row.Details = "[Locked] " + (string.IsNullOrEmpty(rItem.Error) ? "File locked by another process" : rItem.Error);
+                        }
+                    }
+
+                    _pendingExecutionReport.RemainingCleanableCount = remainingCleanable;
+                    _pendingExecutionReport.RemainingAccountIdCount = remainingAccountIds;
+                    _lastExecutionReport = _pendingExecutionReport;
+                    _pendingExecutionReport = null;
+                    RefreshReportsView();
+                    SelectNavTab(1);
+                    ShowCleanupReportDialog(_lastExecutionReport);
+                }
+                else if (_activeNavIndex == 1)
                 {
                     RefreshReportsView();
                 }
-
-                _lblStatusBar.Text = string.Format(s["StatusVerified"], checkedCount, remainingCleanable);
-                AppendLog(string.Format("Verify finished: checked={0}, remaining cleanable={1}.", checkedCount, remainingCleanable));
             });
         }
 
@@ -4296,26 +4958,28 @@ namespace ClaudeResidualIdCleaner
             if (_txtReportAuditSummary == null) return;
             var s = Localization.GetStrings(_lang);
 
-            if (_demoAudit || _isDemoCleaning || _isDemoVerified)
-            {
-                _lblReportAuditMeta.Text = "DEMO · AUDIT.md (sanitized mock preview)";
-                _txtReportAuditSummary.Text = string.Format(
-                    "Detected Entries: {0}\r\nNon-Secret Account/Device UUIDs: {1}\r\nDemo Mode: Zero real disk reads performed.",
-                    _allRows.Count, _accountIdRecords.Count);
-                _lblReportPlanMeta.Text = _hasPlan ? ("SHA-256: " + _planSha256) : "DEMO · CLEANUP-PLAN.md";
-                _txtReportPlanSummary.Text = _hasPlan
-                    ? string.Format("SchemaVersion: 3\r\nPolicy: {0}\r\nReady Targets: {1}", GetActivePolicy(), _readyCount)
-                    : s["ReportMissing"];
-                _lblReportVerifyMeta.Text = _isDemoVerified ? "DEMO · VERIFICATION.md (Outcome: Succeeded)" : "DEMO · VERIFICATION.md";
-                _txtReportVerifySummary.Text = _isDemoVerified
-                    ? string.Format("Outcome: Succeeded | Cleared: {0} | Remaining Cleanable: 0", _lastCleanedCount)
-                    : s["ReportMissing"];
-                _btnSavePlanAs.IsEnabled = false;
-                _btnOpenPlanFile.IsEnabled = false;
-                _btnSaveVerifyAs.IsEnabled = false;
-                _btnOpenVerifyFile.IsEnabled = false;
-                return;
-            }
+                if (_demoAudit || _isDemoCleaning || _isDemoVerified)
+                {
+                    _lblReportAuditMeta.Text = "DEMO · AUDIT.md (sanitized mock preview)";
+                    _txtReportAuditSummary.Text = string.Format(
+                        "Detected Entries: {0}\r\nNon-Secret Account/Device UUIDs: {1}\r\nDemo Mode: Zero real disk reads performed.",
+                        _allRows.Count, _accountIdRecords.Count);
+                    _lblReportPlanMeta.Text = _hasPlan ? ("SHA-256: " + _planSha256) : "DEMO · CLEANUP-PLAN.md";
+                    _txtReportPlanSummary.Text = _hasPlan
+                        ? string.Format("SchemaVersion: 3\r\nPolicy: {0}\r\nReady Targets: {1}", GetActivePolicy(), _readyCount)
+                        : s["ReportMissing"];
+                    _lblReportVerifyMeta.Text = _isDemoVerified ? "DEMO · VERIFICATION.md (Outcome: Succeeded)" : "DEMO · VERIFICATION.md";
+                    _txtReportVerifySummary.Text = (_lastExecutionReport != null)
+                        ? FormatExecutionReportMarkdown(_lastExecutionReport, _lang)
+                        : (_isDemoVerified
+                            ? string.Format("Outcome: Succeeded | Cleared: {0} | Remaining Cleanable: 0", _lastCleanedCount)
+                            : s["ReportMissing"]);
+                    _btnSavePlanAs.IsEnabled = false;
+                    _btnOpenPlanFile.IsEnabled = false;
+                    _btnSaveVerifyAs.IsEnabled = false;
+                    _btnOpenVerifyFile.IsEnabled = false;
+                    return;
+                }
 
             if (string.IsNullOrEmpty(_toolkitRoot))
             {
@@ -4370,7 +5034,21 @@ namespace ClaudeResidualIdCleaner
 
                 if (string.Equals(fileName, "VERIFICATION.md", StringComparison.OrdinalIgnoreCase))
                 {
-                    summaryBox.Text = SummarizeVerificationMarkdown(text);
+                    string verSummary = SummarizeVerificationMarkdown(text);
+                    if (_lastExecutionReport != null)
+                    {
+                        string hdr = string.Format(
+                            s["View2LatestCleanupHeader"],
+                            _lastExecutionReport.CleanedCount,
+                            FormatSpaceMb(_lastExecutionReport.FreedBytes),
+                            _lastExecutionReport.LockedCount,
+                            _lastExecutionReport.RemainingAccountIdCount);
+                        summaryBox.Text = hdr + "\r\n\r\n" + FormatExecutionReportMarkdown(_lastExecutionReport, _lang) + "\r\n---\r\n" + verSummary;
+                    }
+                    else
+                    {
+                        summaryBox.Text = verSummary;
+                    }
                 }
                 else if (string.Equals(fileName, "CLEANUP-PLAN.md", StringComparison.OrdinalIgnoreCase))
                 {
@@ -4412,18 +5090,20 @@ namespace ClaudeResidualIdCleaner
         {
             var sb = new StringBuilder();
             sb.AppendLine("File SHA-256: " + fileSha);
-            int start = text.IndexOf("<!-- PLAN-MANIFEST-BEGIN -->", StringComparison.Ordinal);
-            int end = text.IndexOf("<!-- PLAN-MANIFEST-END -->", StringComparison.Ordinal);
+            string beginTag = text.Contains("<!-- MANIFEST-JSON-BEGIN -->") ? "<!-- MANIFEST-JSON-BEGIN -->" : "<!-- PLAN-MANIFEST-BEGIN -->";
+            string endTag = text.Contains("<!-- MANIFEST-JSON-END -->") ? "<!-- MANIFEST-JSON-END -->" : "<!-- PLAN-MANIFEST-END -->";
+            int start = text.IndexOf(beginTag, StringComparison.Ordinal);
+            int end = text.IndexOf(endTag, StringComparison.Ordinal);
             if (start >= 0 && end > start)
             {
-                string json = text.Substring(start + "<!-- PLAN-MANIFEST-BEGIN -->".Length, end - start - "<!-- PLAN-MANIFEST-BEGIN -->".Length).Trim();
+                string json = text.Substring(start + beginTag.Length, end - start - beginTag.Length).Trim();
                 try
                 {
                     Dictionary<string, object> manifest = ParseJsonObject(json);
                     sb.AppendLine("PlanId: " + GetDictString(manifest, "PlanId"));
                     sb.AppendLine("GeneratedUtc: " + GetDictString(manifest, "GeneratedUtc"));
                     object entriesObj;
-                    if (manifest.TryGetValue("Entries", out entriesObj) && entriesObj is ArrayList)
+                    if ((manifest.TryGetValue("Records", out entriesObj) || manifest.TryGetValue("Entries", out entriesObj)) && entriesObj is ArrayList)
                     {
                         var entries = (ArrayList)entriesObj;
                         int ready = 0;
@@ -4688,6 +5368,7 @@ namespace ClaudeResidualIdCleaner
             bool demoAudit = false;
             bool demoCleaning = false;
             bool demoVerified = false;
+            bool demoReport = false;
             int initialNavIndex = 0;
 
             for (int i = 0; i < args.Length; i++)
@@ -4712,6 +5393,10 @@ namespace ClaudeResidualIdCleaner
                 else if (string.Equals(a, "--demo-verified", StringComparison.OrdinalIgnoreCase))
                 {
                     demoVerified = true;
+                }
+                else if (string.Equals(a, "--demo-report", StringComparison.OrdinalIgnoreCase))
+                {
+                    demoReport = true;
                 }
                 else if (string.Equals(a, "--nav", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
@@ -4746,6 +5431,10 @@ namespace ClaudeResidualIdCleaner
                 {
                     win.ApplyDemoCleaningState();
                 }
+                else if (demoReport && dryRun)
+                {
+                    win.ApplyDemoReportState(true);
+                }
                 else if (demoVerified && dryRun)
                 {
                     win.ApplyDemoVerifiedState();
@@ -4773,6 +5462,10 @@ namespace ClaudeResidualIdCleaner
                 {
                     captureWin.ApplyDemoCleaningState();
                 }
+                else if (demoReport && dryRun)
+                {
+                    captureWin.ApplyDemoReportState(false);
+                }
                 else if (demoVerified && dryRun)
                 {
                     captureWin.ApplyDemoVerifiedState();
@@ -4794,16 +5487,44 @@ namespace ClaudeResidualIdCleaner
             }
 
             var app = new Application();
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            string splashLang = string.IsNullOrEmpty(language) ? Localization.DetectDefaultLanguage() : language;
             var mainWindow = new MainWindow(language, toolkitRoot, dryRun, demoAudit, initialNavIndex);
             if (demoCleaning && dryRun)
             {
                 mainWindow.ApplyDemoCleaningState();
             }
+            else if (demoReport && dryRun)
+            {
+                mainWindow.ApplyDemoReportState(false);
+            }
             else if (demoVerified && dryRun)
             {
                 mainWindow.ApplyDemoVerifiedState();
             }
-            app.Run(mainWindow);
+
+            Window splashWin = MainWindow.CreateStartupSplashWindow(splashLang, mainWindow.Icon);
+            splashWin.Show();
+
+            var splashTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(460) };
+            splashTimer.Tick += delegate
+            {
+                splashTimer.Stop();
+                app.MainWindow = mainWindow;
+                app.ShutdownMode = ShutdownMode.OnMainWindowClose;
+                mainWindow.Show();
+                mainWindow.Activate();
+
+                var fadeOut = new DoubleAnimation(1.0, 0.0, TimeSpan.FromMilliseconds(180));
+                fadeOut.Completed += delegate
+                {
+                    try { splashWin.Close(); } catch { }
+                };
+                splashWin.BeginAnimation(Window.OpacityProperty, fadeOut);
+            };
+            splashTimer.Start();
+
+            app.Run();
             return 0;
         }
     }

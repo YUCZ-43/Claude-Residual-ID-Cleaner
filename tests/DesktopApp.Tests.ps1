@@ -211,6 +211,8 @@ try {
         $jZh.HasCleaningProgressPanel -and
         $jZh.HasCompletionSummaryBanner -and
         $jZh.HasReportsView -and
+        $jZh.HasStartupSplash -and
+        $jZh.HasCleanupReportDialog -and
         (-not [string]::IsNullOrWhiteSpace($jZh.PrivilegeBadgeText)) -and
         (-not $jZh.InitialCleanButtonEnabled) -and
         $jZh.BackendFound -and
@@ -270,12 +272,22 @@ try {
     $pDemoVerSt.WaitForExit()
     $jDemoVer = [IO.File]::ReadAllText($outDemoVer, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 
+    $demoRepPng = Join-Path $appSandbox 'demo-report-capture.png'
+    $pCapRep = [System.Diagnostics.Process]::Start($sandboxExe, "--demo-report --dry-run --language zh-CN --nav 1 --toolkit-root `"$repoRoot`" --capture-png `"$demoRepPng`"")
+    $pCapRep.WaitForExit()
+    $outDemoRep = Join-Path $appSandbox 'selftest-demo-report.json'
+    $pDemoRepSt = [System.Diagnostics.Process]::Start($sandboxExe, "--headless --demo-report --dry-run --language zh-CN --toolkit-root `"$repoRoot`" --self-test `"$outDemoRep`"")
+    $pDemoRepSt.WaitForExit()
+    $jDemoRep = [IO.File]::ReadAllText($outDemoRep, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+
     Assert-True (
         $pCapClean.ExitCode -eq 0 -and (Test-Path -LiteralPath $demoCleanPng -PathType Leaf) -and ((Get-Item -LiteralPath $demoCleanPng).Length -gt 20480) -and
         $pDemoCleanSt.ExitCode -eq 0 -and $jDemoClean.CleaningProgressVisible -and (-not $jDemoClean.CompletionBannerVisible) -and
         $pCapVer.ExitCode -eq 0 -and (Test-Path -LiteralPath $demoVerPng -PathType Leaf) -and ((Get-Item -LiteralPath $demoVerPng).Length -gt 20480) -and
-        $pDemoVerSt.ExitCode -eq 0 -and $jDemoVer.CompletionBannerVisible -and (-not $jDemoVer.CleaningProgressVisible)
-    ) 'Compiled WPF .exe --demo-cleaning and --demo-verified render real-time progress and 0-remaining completion summary banners cleanly'
+        $pDemoVerSt.ExitCode -eq 0 -and $jDemoVer.CompletionBannerVisible -and (-not $jDemoVer.CleaningProgressVisible) -and
+        $pCapRep.ExitCode -eq 0 -and (Test-Path -LiteralPath $demoRepPng -PathType Leaf) -and ((Get-Item -LiteralPath $demoRepPng).Length -gt 20480) -and
+        $pDemoRepSt.ExitCode -eq 0 -and $jDemoRep.DemoReportDialogVerified
+    ) 'Compiled WPF .exe --demo-cleaning, --demo-verified, and --demo-report render progress, completion, and execution report modals cleanly'
 
     # 8. Verify --demo-audit populates non-secret residual Account IDs cleanly
     $outDemo = Join-Path $appSandbox 'selftest-demo.json'
@@ -434,6 +446,33 @@ try {
         ($progText -match 'ConfirmCloseRunningClaudeProcesses') -and
         ($progText -match '-CloseRunningProcesses')
     ) 'Compiled .exe strips ANSI codes, separates OS Protected vs FullRemoval Scope badges, formats close-process prompts, and formats reassuring bilingual PartialFailure summaries'
+
+    $locType = $guiAsm.GetType('ClaudeResidualIdCleaner.Localization', $true)
+    $zhDict = $locType.GetMethod('GetStrings').Invoke($null, @('zh-CN'))
+    $clsArgsAcc = [object[]]@($zhDict, 'cli-home', 'FullRemoval', 'Blocked', 'AccountData', '', '')
+    $null = $mainWinType.GetMethod('ClassifyNonReadyToneAndLabel').Invoke($null, $clsArgsAcc)
+    $clsArgsFull = [object[]]@($zhDict, 'desktop-local', 'FullRemoval', 'Blocked', 'FullRemoval', '', '')
+    $null = $mainWinType.GetMethod('ClassifyNonReadyToneAndLabel').Invoke($null, $clsArgsFull)
+    $clsArgsOs = [object[]]@($zhDict, 'desktop-msix-data', 'FullRemoval', 'Blocked', 'AccountData', '', '')
+    $null = $mainWinType.GetMethod('ClassifyNonReadyToneAndLabel').Invoke($null, $clsArgsOs)
+
+    $preSizes = New-Object 'System.Collections.Generic.Dictionary[string,Int64]'
+    $preSizes['cli-credentials'] = 2048
+    $preSizes['desktop-buddy-tokens'] = 2048
+    $execRpt = $mainWinType.GetMethod('BuildExecutionReportData').Invoke($null, [object[]]@('AccountData', ('a' * 64), $partialJson, '', $preSizes.PSObject.BaseObject))
+    $execRptMd = [string]$mainWinType.GetMethod('FormatExecutionReportMarkdown').Invoke($null, [object[]]@($execRpt, 'zh-CN'))
+
+    Assert-True (
+        ($clsArgsAcc[5] -eq 'Excluded') -and
+        ($clsArgsAcc[6] -eq '需切换至完整清理') -and
+        ($clsArgsFull[5] -eq 'Review') -and
+        ($clsArgsOs[5] -eq 'Protected') -and
+        ($execRpt.CleanedCount -eq 2) -and
+        ($execRpt.LockedCount -eq 1) -and
+        ($execRpt.FreedBytes -eq 4096) -and
+        ($execRptMd -match '已彻底清除') -and
+        ($execRptMd -match 'chrome-native-host\.log')
+    ) 'ClassifyNonReadyToneAndLabel never labels Claude parent folders OS Protected and BuildExecutionReportData computes cleaned, freed MB, and locked summaries accurately'
 
     Write-Output "RESULT: $passed passed; $skipped skipped; $notExecuted not_executed; $($failedList.Count) failed"
     if ($failedList.Count -gt 0) { exit 1 }

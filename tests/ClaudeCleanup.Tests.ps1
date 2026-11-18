@@ -245,17 +245,19 @@ try {
     New-Item -ItemType Directory -Path $empty | Out-Null
     Assert-True ((Invoke-SafeFileRemoval -Path $empty -AllowedRoots @($allowed) -Confirm:$false).Status -eq 'Removed') 'empty directory removed'
 
-    $partialDir = Join-Path $allowed 'partial-dir'
+    $partialDir = Join-Path $sandbox 'partial-dir-firstlock'
     New-Item -ItemType Directory -Path $partialDir | Out-Null
-    $pFile1 = Join-Path $partialDir 'a_unlocked.txt'
-    $pFile2 = Join-Path $partialDir 'z_locked.txt'
-    Set-Content -LiteralPath $pFile1 -Value 'a'
-    Set-Content -LiteralPath $pFile2 -Value 'z'
-    $pStream = [IO.File]::Open($pFile2, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+    $pFileLockedFirst = Join-Path $partialDir 'a_locked.txt'
+    $pFileUnlockedAfter = Join-Path $partialDir 'z_unlocked.txt'
+    Set-Content -LiteralPath $pFileLockedFirst -Value 'locked'
+    Set-Content -LiteralPath $pFileUnlockedAfter -Value 'unlocked'
+    $pStream = [IO.File]::Open($pFileLockedFirst, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
     $openStreams.Add($pStream)
     try {
+        $snapLocked = Get-SafeTreeSnapshot -Path $partialDir
+        Assert-True ($snapLocked.Entries -ge 3) 'Get-SafeTreeSnapshot handles SharingViolation on open child file without blocking parent folder'
         $partialRes = Invoke-SafeFileRemoval -Path $partialDir -AllowedRoots @($partialDir) -ReturnFailureResult -Confirm:$false
-        Assert-True ($partialRes.Status -eq 'Failed' -and $partialRes.PartialRemoval -and $partialRes.ItemsRemoved -ge 1 -and $partialRes.ItemsFailed -ge 1 -and $partialRes.RemainingExists) 'partial directory failure accurately detected'
+        Assert-True ($partialRes.Status -eq 'Failed' -and $partialRes.PartialRemoval -and $partialRes.ItemsRemoved -ge 1 -and $partialRes.ItemsFailed -ge 1 -and $partialRes.RemainingExists -and (-not (Test-Path -LiteralPath $pFileUnlockedAfter))) 'partial directory failure continues deleting unlocked siblings even when first child is locked'
     } finally {
         Unlock-Safely $pStream
         $openStreams.Remove($pStream) | Out-Null
@@ -444,13 +446,13 @@ try {
     $s1 = @($ar.Results | Where-Object { $_.Id -eq 'pf-1' })[0].Status
     $s2 = @($ar.Results | Where-Object { $_.Id -eq 'pf-2' })[0].Status
     $s3 = @($ar.Results | Where-Object { $_.Id -eq 'pf-3' })[0].Status
-    Assert-True ($ar.Outcome -eq 'PartialFailure' -and $s1 -eq 'Removed' -and $s2 -eq 'Failed' -and $s3 -eq 'NotExecuted') 'partial failure records Removed, Failed, and NotExecuted accurately'
+    Assert-True ($ar.Outcome -eq 'PartialFailure' -and $s1 -eq 'Removed' -and $s2 -eq 'Failed' -and $s3 -eq 'Removed') 'partial failure records Removed and Failed while continuing remaining independent targets'
 
     $verOut = Invoke-CleanupVerify -PlanPath $pfPlan -VerificationPath $pfVer -CandidatesOverride $pfCands
     $v1 = @($verOut.PlanChecks | Where-Object { $_.Id -eq 'pf-1' })[0]
     $v2 = @($verOut.PlanChecks | Where-Object { $_.Id -eq 'pf-2' })[0]
     $v3 = @($verOut.PlanChecks | Where-Object { $_.Id -eq 'pf-3' })[0]
-    Assert-True (($v1.PresenceState -eq 'Absent') -and ($v2.PresenceState -eq 'Present') -and ($v3.PresenceState -eq 'Present') -and $verOut.LedgerEntries.Count -eq 1 -and $verOut.LedgerEntries[0].Outcome -eq 'PartialFailure') 'post-apply Verify reports exact 3-state presence and ledger outcome'
+    Assert-True (($v1.PresenceState -eq 'Absent') -and ($v2.PresenceState -eq 'Present') -and ($v3.PresenceState -eq 'Absent') -and ($verOut.PSObject.Properties['RemainingAccountIds']) -and $verOut.LedgerEntries.Count -eq 1 -and $verOut.LedgerEntries[0].Outcome -eq 'PartialFailure') 'post-apply Verify reports continue-on-error 3-state presence, RemainingAccountIds, and ledger outcome'
 
     # 13. Stage C: Windows coverage (npm, MSIX, VS Code, AppData classification, residuals, ACL diagnostics, JSON output)
     $npmPrefix = Join-Path $sandbox 'npm-prefix'

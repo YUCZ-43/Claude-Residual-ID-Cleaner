@@ -900,9 +900,12 @@ function Get-SafeTreeSnapshot {
                     $fHandle = [ClaudeCleanup.NativeFs]::OpenHandle($childPath, $false, $false, [ref]$fErr)
                     try {
                         if ($fHandle.IsInvalid) {
-                            throw (New-Object System.ComponentModel.Win32Exception($fErr, "Cannot open child file for ownership check: $childPath"))
+                            if ($fErr -notin @(32, 33)) {
+                                throw (New-Object System.ComponentModel.Win32Exception($fErr, "Cannot open child file for ownership check: $childPath"))
+                            }
+                        } else {
+                            Assert-HandleIdentity -Handle $fHandle -ExpectedNormalPath $childPath -RequireOwnerMatch -ExpectDirectory:$false | Out-Null
                         }
-                        Assert-HandleIdentity -Handle $fHandle -ExpectedNormalPath $childPath -RequireOwnerMatch -ExpectDirectory:$false | Out-Null
                     } finally {
                         if ($null -ne $fHandle) { $fHandle.Dispose() }
                     }
@@ -949,6 +952,7 @@ function Invoke-HandleTreeDeletion {
         ItemsRemoved = 0
         ItemsFailed = 0
         Errors = (New-Object 'System.Collections.Generic.List[string]')
+        AbortTree = $false
     }
 
     function Remove-NodeByHandle {
@@ -968,6 +972,7 @@ function Invoke-HandleTreeDeletion {
         $isDir = (($attrs -band [ClaudeCleanup.NativeFs]::FILE_ATTRIBUTE_DIRECTORY) -ne 0)
         [int]$openErr = 0
         $handle = [ClaudeCleanup.NativeFs]::OpenHandle($NodePath, $true, $isDir, [ref]$openErr)
+        $hadChildSecurityError = $false
         try {
             if ($handle.IsInvalid) {
                 if ([ClaudeCleanup.NativeFs]::IsNotFoundError($openErr)) { return }
@@ -975,31 +980,41 @@ function Invoke-HandleTreeDeletion {
             }
             $id = Assert-HandleIdentity -Handle $handle -ExpectedNormalPath $NodePath -RequireOwnerMatch:$CheckOwner -ExpectDirectory:$isDir
             if ($null -ne $NodeExpectedVolumeSerial -and $id.VolumeSerialNumber -ne [uint32]$NodeExpectedVolumeSerial) {
+                $hadChildSecurityError = $true
                 throw "Target volume changed before deletion: $NodePath"
             }
             if ($null -ne $NodeExpectedFileIndex -and [uint64]$NodeExpectedFileIndex -ne 0 -and $id.FileIndex -ne [uint64]$NodeExpectedFileIndex) {
+                $hadChildSecurityError = $true
                 throw "Target file identity (FileIndex) changed before deletion: $NodePath"
             }
+            $dirStartFails = $state.ItemsFailed
             if ($isDir) {
                 $children = [ClaudeCleanup.NativeFs]::EnumerateHandleChildren($handle)
                 foreach ($child in $children) {
                     if (($child.Attributes -band [ClaudeCleanup.NativeFs]::FILE_ATTRIBUTE_REPARSE_POINT) -ne 0) {
+                        $hadChildSecurityError = $true
                         throw "Linked child blocks removal: $(Join-Path $NodePath $child.Name)"
                     }
                     $childPath = Join-Path $NodePath $child.Name
                     if ($childPath -match '(^|[\\/])\.\.?$' -or $child.Name -match '[*?:/\\]') {
+                        $hadChildSecurityError = $true
                         throw "Unsafe child path during removal: $childPath"
                     }
                     $childIdx = if ($child.FileIndex -ne 0) { [Nullable[uint64]]$child.FileIndex } else { $null }
                     Remove-NodeByHandle -NodePath $childPath -NodeExpectedFileIndex $childIdx -NodeExpectedVolumeSerial $id.VolumeSerialNumber -CheckOwner $CheckOwner
-                    if ($state.ItemsFailed -gt 0) { return }
+                    if ($state.AbortTree) { return }
                 }
             }
-            [ClaudeCleanup.NativeFs]::DeleteHandleObject($handle, $id.Attributes)
-            $state.ItemsRemoved++
+            if ($state.ItemsFailed -eq $dirStartFails) {
+                [ClaudeCleanup.NativeFs]::DeleteHandleObject($handle, $id.Attributes)
+                $state.ItemsRemoved++
+            }
         } catch {
             $state.ItemsFailed++
             $state.Errors.Add($_.Exception.Message)
+            if ($hadChildSecurityError -or $_.Exception.Message -match 'Owner mismatch|Reparse point|Linked child|Unsafe child|changed before deletion|outside allowlist|symlink') {
+                $state.AbortTree = $true
+            }
         } finally {
             if ($null -ne $handle) { $handle.Dispose() }
         }
@@ -1990,6 +2005,17 @@ function Get-ClaudeProcess {
         try { $projRootNorm = [IO.Path]::GetFullPath($script:ProjectRoot).TrimEnd('\', '/') + '\' } catch {}
     }
 
+    $cimNativeHostsByPid = @{}
+    if ($null -eq $ProcessesOverride) {
+        try {
+            foreach ($cimRow in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'chrome-native-host.exe'" -ErrorAction Stop)) {
+                if ($null -ne $cimRow -and $null -ne $cimRow.ProcessId) {
+                    $cimNativeHostsByPid[[int]$cimRow.ProcessId] = $cimRow
+                }
+            }
+        } catch {}
+    }
+
     $matched = New-Object 'System.Collections.Generic.List[object]'
     foreach ($p in $rawList) {
         if ($null -eq $p) { continue }
@@ -2034,20 +2060,23 @@ function Get-ClaudeProcess {
 
         if ($isNativeHost) {
             if ($null -eq $ProcessesOverride -and $procId -gt 0 -and ([string]::IsNullOrWhiteSpace($procPath) -or [string]::IsNullOrWhiteSpace($procCmd))) {
-                try {
-                    $cimProc = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = $procId") -ErrorAction Stop
-                    if ($null -ne $cimProc) {
-                        if ([string]::IsNullOrWhiteSpace($procPath) -and $null -ne $cimProc.ExecutablePath) {
-                            $procPath = [string]$cimProc.ExecutablePath
-                        }
-                        if ([string]::IsNullOrWhiteSpace($procCmd) -and $null -ne $cimProc.CommandLine) {
-                            $procCmd = [string]$cimProc.CommandLine
-                        }
+                $cimProc = $null
+                if ($cimNativeHostsByPid.ContainsKey($procId)) {
+                    $cimProc = $cimNativeHostsByPid[$procId]
+                } else {
+                    try { $cimProc = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = $procId") -ErrorAction Stop } catch {}
+                }
+                if ($null -ne $cimProc) {
+                    if ([string]::IsNullOrWhiteSpace($procPath) -and $null -ne $cimProc.ExecutablePath) {
+                        $procPath = [string]$cimProc.ExecutablePath
                     }
-                } catch {}
+                    if ([string]::IsNullOrWhiteSpace($procCmd) -and $null -ne $cimProc.CommandLine) {
+                        $procCmd = [string]$cimProc.CommandLine
+                    }
+                }
             }
-            $matchesClaudeHost = ($procPath -match '(?i)(?:\\AnthropicClaude\\|\\Claude\\|\\WindowsApps\\Claude_|[\\/]Claude[\\/])') -or
-                ($procCmd -match '(?i)(?:com\.anthropic\.claude_browser_extension|AnthropicClaude|WindowsApps[\\/]Claude_|[\\/]Claude[\\/])')
+            $matchesClaudeHost = ($procPath -match '(?i)(?:\\AnthropicClaude\\|\\Anthropic[^\\]*\\|\\Claude\\|\\WindowsApps\\Claude_|[\\/]Claude[\\/])') -or
+                ($procCmd -match '(?i)(?:com\.anthropic\.claude_browser_extension|com\.anthropic\.claude|AnthropicClaude|Anthropic[^\\/]*[\\/]Claude|WindowsApps[\\/]Claude_|[\\/]Claude[\\/])')
             if (-not $matchesClaudeHost) {
                 continue
             }
@@ -2871,17 +2900,29 @@ function Invoke-CleanupApply {
     }
 
     if ($CloseRunningProcesses -and $runningClaudeProcesses.Count -gt 0) {
-        foreach ($proc in $runningClaudeProcesses) {
+        # Terminate main Claude desktop/CLI processes before native host helpers to prevent respawns
+        $orderedProcs = @(
+            $runningClaudeProcesses | Sort-Object { if ($_.ProcessName -match '(?i)^chrome-native-host') { 1 } else { 0 } }
+        )
+        $stopOneProc = {
+            param($targetProc)
             if ($null -ne $StopProcessAction) {
-                & $StopProcessAction $proc
-            } elseif ($proc.Id -gt 0) {
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                & $StopProcessAction $targetProc
+            } elseif ($targetProc.Id -gt 0) {
+                Stop-Process -Id $targetProc.Id -Force -ErrorAction SilentlyContinue
             }
+        }
+        foreach ($proc in $orderedProcs) {
+            & $stopOneProc $proc
         }
         if ($null -eq $ProcessesOverride) {
             for ($waitStep = 0; $waitStep -lt 10; $waitStep++) {
                 Start-Sleep -Milliseconds 250
-                if (@(Get-ClaudeProcess).Count -eq 0) { break }
+                $remainingProcs = @(Get-ClaudeProcess)
+                if ($remainingProcs.Count -eq 0) { break }
+                foreach ($remProc in $remainingProcs) {
+                    & $stopOneProc $remProc
+                }
             }
             $stillRunning = @(Get-ClaudeProcess)
             if ($stillRunning.Count -gt 0) {
@@ -2904,26 +2945,11 @@ function Invoke-CleanupApply {
     Save-ExecutionLedgerEntry -VerificationPath $VerificationPath -Entry $ledgerEntry
 
     $failed = $false
-    $failureMessage = ''
+    $failedMessages = New-Object 'System.Collections.Generic.List[string]'
     $succeededCount = 0
 
     for ($idx = 0; $idx -lt $selected.Count; $idx++) {
         $record = $selected[$idx]
-        if ($failed) {
-            $pres = Get-RecordPresenceState -Record $record
-            $rem = if ($pres.State -eq 'Present') { $true } elseif ($pres.State -eq 'Absent') { $false } else { $null }
-            $notExecErr = 'Aborted due to earlier target failure.'
-            $results.Add([pscustomobject]@{
-                Id = $record.Id; Policy = $record.Policy; Kind = $record.Kind; Path = $record.Path
-                Status = 'NotExecuted'; ItemsRemoved = 0; ItemsFailed = 0; PartialRemoval = $false
-                RemainingExists = $rem; PresenceState = $pres.State; VerifiedAbsent = ($pres.State -eq 'Absent')
-                Error = $notExecErr
-            })
-            if ($EmitProgress) {
-                Write-CleanupProgressEvent -Phase 'Result' -Index ($idx + 1) -Total $selected.Count -Id $record.Id -Path $record.Path -Status 'NotExecuted' -Error $notExecErr
-            }
-            continue
-        }
 
         if ($EmitProgress) {
             Write-CleanupProgressEvent -Phase 'Cleaning' -Index ($idx + 1) -Total $selected.Count -Id $record.Id -Path $record.Path
@@ -2938,7 +2964,7 @@ function Invoke-CleanupApply {
                 $res = Invoke-SafeFileRemoval -Path $record.Path -AllowedRoots @($record.Path) -ExpectedFileIndex $expFileIdx -ExpectedVolumeSerial $expVol -ReturnFailureResult -Confirm:$false
                 if ($res.Status -eq 'Failed') {
                     $failed = $true
-                    $failureMessage = "Target $($record.Id) failed: $($res.Error)"
+                    $failedMessages.Add("Target $($record.Id) failed: $($res.Error)")
                     $emitStatus = 'Failed'
                     $emitError = [string]$res.Error
                     $results.Add([pscustomobject]@{
@@ -2967,7 +2993,7 @@ function Invoke-CleanupApply {
             }
         } catch {
             $failed = $true
-            $failureMessage = "Target $($record.Id) failed: $($_.Exception.Message)"
+            $failedMessages.Add("Target $($record.Id) failed: $($_.Exception.Message)")
             $emitStatus = 'Failed'
             $emitError = [string]$_.Exception.Message
             $pres = Get-RecordPresenceState -Record $record
@@ -2984,8 +3010,9 @@ function Invoke-CleanupApply {
         }
     }
 
-    $hasPartial = (@($results | Where-Object { $_.PartialRemoval }).Count -gt 0) -or ($failed -and ($succeededCount -gt 0 -or @($results | Where-Object { $_.Status -eq 'NotExecuted' }).Count -gt 0))
+    $hasPartial = (@($results | Where-Object { $_.PartialRemoval }).Count -gt 0) -or ($failed -and $succeededCount -gt 0)
     $outcome = if (-not $failed) { 'Succeeded' } elseif ($hasPartial) { 'PartialFailure' } else { 'Failed' }
+    $failureMessage = $failedMessages -join '; '
 
     $finalEntry = [pscustomobject]@{
         PlanId = $manifest.PlanId
@@ -3062,6 +3089,7 @@ function Invoke-CleanupVerify {
         PlanSha256 = $planSha
         PlanError = $planError
         CurrentInventory = $currentRecords.ToArray()
+        RemainingAccountIds = @(Get-ClaudeResidualAccountMetadata)
         PlanChecks = $planChecks.ToArray()
         LedgerEntries = $ledger
         LedgerError = $ledgerError

@@ -173,6 +173,25 @@ namespace ClaudeResidualIdCleaner
                     "已完成大部分清理（已移除 {0} 项），但有 {1} 项因文件被其他进程占用或权限受限而暂未删除。\r\n\r\n" +
                     "已成功清理：\r\n{2}\r\n\r\n" +
                     "仍被占用或未执行（请关闭相关程序或浏览器后重新扫描清理）：\r\n{3}";
+                d["SplashSubtitle"] = "正在初始化安全检测引擎...";
+                d["ExecReportTitle"] = "清理完成详情报告";
+                d["ExecReportSubtitle"] = "安全清理执行结果明细与账号残余核验摘要";
+                d["ExecReportAccountCleared"] = "账号 / 组织 ID 残留：0（已彻底清除）";
+                d["ExecReportAccountRemaining"] = "仍检测到 {0} 项账号 / 组织 ID 残留（请参考下方占用提示）";
+                d["ExecReportStatCleaned"] = "已清理项目";
+                d["ExecReportStatFreed"] = "释放磁盘空间";
+                d["ExecReportStatLocked"] = "被占用 / 跳过";
+                d["ExecReportCleanedSection"] = "已彻底清除项目 ({0})";
+                d["ExecReportLockedSection"] = "仍被占用或跳过项 ({0})";
+                d["ExecReportNoneCleaned"] = "本次未移除任何新文件。";
+                d["ExecReportNoneLocked"] = "无被占用或跳过项 — 所有已选目标均已验证清除。";
+                d["ExecReportLockedAdvice"] = "处理建议：请关闭仍在运行的相关应用（如 Chrome、Edge 浏览器或系统托盘里的 Claude），然后点击“1. 立即扫描体检”重新清理该项。";
+                d["ExecReportBtnCopy"] = "复制详情报告";
+                d["ExecReportBtnCopied"] = "已复制报告";
+                d["ExecReportBtnExport"] = "导出报告文件 (.md)";
+                d["ExecReportBtnClose"] = "关闭";
+                d["ExecReportExportTitle"] = "导出清理完成详情报告 (.md)";
+                d["View2LatestCleanupHeader"] = "[最新本次清理结果] 已清理 {0} 项 | 释放 {1} | 被占用 {2} 项 | 账号 ID 残留 {3}";
             }
             else
             {
@@ -333,6 +352,25 @@ namespace ClaudeResidualIdCleaner
                     "Most residuals were cleaned ({0} removed), while {1} item(s) could not be deleted due to active file locks or access constraints.\r\n\r\n" +
                     "Cleaned items:\r\n{2}\r\n\r\n" +
                     "Locked or remaining items (close the locking app/browser, then re-scan and clean):\r\n{3}";
+                d["SplashSubtitle"] = "Initializing Security Audit Engine...";
+                d["ExecReportTitle"] = "Cleanup Execution Report";
+                d["ExecReportSubtitle"] = "Detailed Cleanup Breakdown & Post-Clean Residual Account Verification";
+                d["ExecReportAccountCleared"] = "Account / Org ID Residuals: 0 (Completely Cleared)";
+                d["ExecReportAccountRemaining"] = "{0} Account / Org ID Residual(s) Still Detected (See Locked Items Below)";
+                d["ExecReportStatCleaned"] = "Cleaned Items";
+                d["ExecReportStatFreed"] = "Space Freed";
+                d["ExecReportStatLocked"] = "Locked / Skipped";
+                d["ExecReportCleanedSection"] = "Cleaned Items ({0})";
+                d["ExecReportLockedSection"] = "Locked or Skipped Items ({0})";
+                d["ExecReportNoneCleaned"] = "No items were removed in this run.";
+                d["ExecReportNoneLocked"] = "No locked or skipped items — all selected targets verified absent.";
+                d["ExecReportLockedAdvice"] = "Advice: Close the locking application (such as Chrome, Edge, or Claude in the system tray), then re-scan and clean.";
+                d["ExecReportBtnCopy"] = "Copy Report";
+                d["ExecReportBtnCopied"] = "Copied";
+                d["ExecReportBtnExport"] = "Export Report (.md)";
+                d["ExecReportBtnClose"] = "Close";
+                d["ExecReportExportTitle"] = "Export Cleanup Execution Report (.md)";
+                d["View2LatestCleanupHeader"] = "[Latest Cleanup Summary] Cleaned: {0} | Freed: {1} | Locked: {2} | Remaining Account IDs: {3}";
             }
             return d;
         }
