@@ -34,8 +34,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Syntax parse and read-only CLI checks
-        shell: ${{ matrix.gh_shell }}
+        shell: pwsh
         run: |
+          $stepScript = @'
           Set-StrictMode -Version 2.0
           $ErrorActionPreference = 'Stop'
 
@@ -105,9 +106,14 @@ jobs:
             throw 'Unexpected JSON payload from ClaudeCleanup.ps1 -Verify -OutputFormat Json'
           }
           Write-Host 'CLI_SMOKE_OK: -Help and -Verify -OutputFormat Json exited 0.'
+          '@
+          $stepFile = Join-Path $env:RUNNER_TEMP 'ci-step-1.ps1'
+          [IO.File]::WriteAllText($stepFile, $stepScript, [Text.UTF8Encoding]::new($false))
+          & '${{ matrix.shell_exe }}' -NoProfile -NonInteractive -File $stepFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run full non-destructive test suites
-        shell: ${{ matrix.gh_shell }}
+        shell: pwsh
         run: |
           Set-StrictMode -Version 2.0
           $ErrorActionPreference = 'Stop'
@@ -239,7 +245,7 @@ jobs:
           }
 
       - name: Markdown link, privacy, and tracked-file hygiene checks
-        shell: ${{ matrix.gh_shell }}
+        shell: pwsh
         run: |
           Set-StrictMode -Version 2.0
           $ErrorActionPreference = 'Stop'
@@ -319,8 +325,9 @@ jobs:
           }
 
       - name: Verify release package build and SHA-256 checksum
-        shell: ${{ matrix.gh_shell }}
+        shell: pwsh
         run: |
+          $stepScript = @'
           Set-StrictMode -Version 2.0
           $ErrorActionPreference = 'Stop'
 
@@ -346,10 +353,16 @@ jobs:
               Remove-Item -LiteralPath $smokeOut -Recurse -Force
             }
           }
+          '@
+          $stepFile = Join-Path $env:RUNNER_TEMP 'ci-step-4.ps1'
+          [IO.File]::WriteAllText($stepFile, $stepScript, [Text.UTF8Encoding]::new($false))
+          & '${{ matrix.shell_exe }}' -NoProfile -NonInteractive -File $stepFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build and smoke-test standalone Desktop WPF .exe
-        shell: ${{ matrix.gh_shell }}
+        shell: pwsh
         run: |
+          $stepScript = @'
           Set-StrictMode -Version 2.0
           $ErrorActionPreference = 'Stop'
 
@@ -377,6 +390,11 @@ jobs:
               Remove-Item -LiteralPath $exeSmokeDir -Recurse -Force
             }
           }
+          '@
+          $stepFile = Join-Path $env:RUNNER_TEMP 'ci-step-5.ps1'
+          [IO.File]::WriteAllText($stepFile, $stepScript, [Text.UTF8Encoding]::new($false))
+          & '${{ matrix.shell_exe }}' -NoProfile -NonInteractive -File $stepFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   release-artifacts:
     name: Build Release Artifacts
